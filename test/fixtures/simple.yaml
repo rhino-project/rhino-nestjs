@@ -1,0 +1,22 @@
+model: Article
+slug: articles
+table: articles
+options:
+  belongs_to_organization: false
+  soft_deletes: false
+  audit_trail: false
+columns:
+  title:
+    type: string
+    filterable: true
+    sortable: true
+  body:
+    type: text
+    nullable: true
+relationships: {}
+permissions:
+  editor:
+    actions: [index, show, store, update, destroy]
+    show_fields: "*"
+    create_fields: { title: required, body: nullable }
+    update_fields: { title: sometimes, body: nullable }

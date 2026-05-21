@@ -1,0 +1,9 @@
+src/
+test/
+coverage/
+node_modules/
+.git/
+.plan/
+tsconfig*.json
+jest.config.ts
+*.log

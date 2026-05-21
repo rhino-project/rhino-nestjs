@@ -1,0 +1,3 @@
+export const RHINO_CONFIG = Symbol('RHINO_CONFIG');
+export const RHINO_PRISMA_CLIENT = Symbol('RHINO_PRISMA_CLIENT');
+export const RHINO_MODULE_OPTIONS = Symbol('RHINO_MODULE_OPTIONS');

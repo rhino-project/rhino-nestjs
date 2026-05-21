@@ -1,0 +1,32 @@
+model: Post
+slug: posts
+table: posts
+options:
+  belongs_to_organization: true
+  soft_deletes: true
+  audit_trail: true
+columns:
+  title:
+    type: string
+    filterable: true
+    sortable: true
+    searchable: true
+  content:
+    type: text
+  status:
+    type: enum
+    values: [draft, published]
+relationships:
+  user:
+    type: belongsTo
+    model: User
+permissions:
+  admin:
+    actions: ["*"]
+    show_fields: "*"
+    create_fields: { title: required, content: nullable, status: nullable }
+    update_fields: { title: sometimes, content: nullable, status: nullable }
+  viewer:
+    actions: [index, show]
+    show_fields: [id, title, content, status]
+    hidden_fields: []
