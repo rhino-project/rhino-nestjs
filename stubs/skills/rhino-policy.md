@@ -34,7 +34,7 @@ Ask the user (or read the blueprint YAML) to define:
 Create `src/policies/[model].policy.ts`:
 
 ```typescript
-import { ResourcePolicy } from '@rhino-project/rhino-nestjs';
+import { ResourcePolicy } from '@rhino-dev/rhino-nestjs';
 
 export class PostPolicy extends ResourcePolicy {
   // ── Action Authorization ──────────────────────────────────────

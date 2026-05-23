@@ -1,6 +1,6 @@
 # Master Plan
 
-**Package name:** `@rhino-project/rhino-nestjs`
+**Package name:** `@rhino-dev/rhino-nestjs`
 
 **Overview:** Rhino NestJS is a framework library that auto-generates fully-featured REST APIs from model definitions registered in a configuration object. It replaces the abandoned AdonisJS version with a NestJS implementation that faithfully reproduces the developer experience and feature set of the Laravel (PHP) and Rails (Ruby) versions.
 
@@ -30,7 +30,7 @@ Rationale:
 **Module architecture:**
 
 ```
-@rhino-project/rhino-nestjs/
+@rhino-dev/rhino-nestjs/
   src/
     rhino.module.ts            # Dynamic module: forRoot() / forRootAsync()
     rhino.config.ts            # Config interface and token

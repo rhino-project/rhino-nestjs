@@ -23,8 +23,8 @@ import { INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import * as request from 'supertest';
 import { AppModule } from '../src/app.module';
-import { PrismaService } from '@rhino-project/rhino-nestjs';
-import { AuthService } from '@rhino-project/rhino-nestjs';
+import { PrismaService } from '@rhino-dev/rhino-nestjs';
+import { AuthService } from '@rhino-dev/rhino-nestjs';
 
 export async function createTestApp(): Promise<INestApplication> {
   const module = await Test.createTestingModule({

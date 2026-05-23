@@ -60,7 +60,7 @@ export interface TenantRouteRewriteOptions {
  *
  * Usage:
  *
- *   import { createTenantRouteRewrite, RHINO_CONFIG, RHINO_PRISMA_CLIENT } from '@rhino-project/rhino-nestjs';
+ *   import { createTenantRouteRewrite, RHINO_CONFIG, RHINO_PRISMA_CLIENT } from '@rhino-dev/rhino-nestjs';
  *
  *   async function bootstrap() {
  *     const app = await NestFactory.create(AppModule);

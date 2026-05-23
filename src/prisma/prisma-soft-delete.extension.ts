@@ -2,7 +2,7 @@
  * Prisma client extension implementing Laravel-style soft deletes.
  *
  *   import { PrismaClient } from '@prisma/client';
- *   import { withSoftDelete } from '@rhino-project/rhino-nestjs';
+ *   import { withSoftDelete } from '@rhino-dev/rhino-nestjs';
  *
  *   const prisma = withSoftDelete(new PrismaClient(), ['post', 'comment']);
  *

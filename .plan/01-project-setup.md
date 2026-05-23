@@ -6,12 +6,12 @@
 
 **NestJS implementation:**
 
-The project is a publishable NestJS library built with `nest build`. It is published as `@rhino-project/rhino-nestjs` on npm.
+The project is a publishable NestJS library built with `nest build`. It is published as `@rhino-dev/rhino-nestjs` on npm.
 
 **Package structure:**
 
 ```
-package.json         # name: @rhino-project/rhino-nestjs
+package.json         # name: @rhino-dev/rhino-nestjs
 tsconfig.json        # strict mode, paths, declaration files
 tsconfig.build.json  # build-only config
 nest-cli.json        # NestJS build configuration

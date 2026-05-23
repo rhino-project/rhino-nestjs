@@ -76,7 +76,7 @@ export const BlogPostStoreByRole = {
 Create `src/policies/blog-post.policy.ts`:
 
 ```typescript
-import { ResourcePolicy } from '@rhino-project/rhino-nestjs';
+import { ResourcePolicy } from '@rhino-dev/rhino-nestjs';
 
 export class BlogPostPolicy extends ResourcePolicy {
   // Control which fields each role can write
@@ -153,7 +153,7 @@ npm test
 Check that the model is generating the expected routes:
 
 ```typescript
-import { describeRoutes } from '@rhino-project/rhino-nestjs';
+import { describeRoutes } from '@rhino-dev/rhino-nestjs';
 // In a test or startup log:
 console.log(describeRoutes(configService));
 ```

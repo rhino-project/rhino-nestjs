@@ -47,9 +47,9 @@ export class TestGenerator {
     push(`// Source: .rhino/blueprints/${blueprint.source_file}`);
     push(`// NOTE: this spec imports \`buildEnv\` from the library test helper.`);
     push(`// For your app, replace the import with your own test helper or the`);
-    push(`// published helper re-exported from \`@rhino-project/rhino-nestjs/testing\`.`);
+    push(`// published helper re-exported from \`@rhino-dev/rhino-nestjs/testing\`.`);
     push(`import { buildEnv } from '../../test/helpers/make-controller';`);
-    push(`import type { RhinoConfig } from '@rhino-project/rhino-nestjs';`);
+    push(`import type { RhinoConfig } from '@rhino-dev/rhino-nestjs';`);
     push(``);
 
     // Config helper

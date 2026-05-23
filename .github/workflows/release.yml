@@ -2,14 +2,14 @@
 # Continuous Deployment via npm Trusted Publisher (OIDC)
 # -------------------------------------------------------------------------
 #
-# This workflow publishes @rhino-project/rhino-nestjs to npm without
+# This workflow publishes @rhino-dev/rhino-nestjs to npm without
 # ever holding an NPM_TOKEN secret. npm accepts a short-lived OIDC token
 # minted by GitHub Actions and exchanges it for a scoped publish token
 # on the fly.
 #
 # One-time setup on the npm side:
 #
-#   1. Go to https://www.npmjs.com/package/@rhino-project/rhino-nestjs/access
+#   1. Go to https://www.npmjs.com/package/@rhino-dev/rhino-nestjs/access
 #      (or Manage → Settings → Trusted Publisher)
 #   2. Click "Configure Trusted Publisher"
 #   3. Fill in:

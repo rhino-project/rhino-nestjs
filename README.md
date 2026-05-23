@@ -9,7 +9,7 @@
 ## Installation
 
 ```bash
-npm install @rhino-project/rhino-nestjs
+npm install @rhino-dev/rhino-nestjs
 ```
 
 Then run the interactive installer:
@@ -79,7 +79,7 @@ model AuditLog {
 
 ```typescript title="src/app.module.ts"
 import { Module } from '@nestjs/common';
-import { RhinoModule } from '@rhino-project/rhino-nestjs';
+import { RhinoModule } from '@rhino-dev/rhino-nestjs';
 import { PrismaClient } from '@prisma/client';
 
 const prisma = new PrismaClient();
@@ -127,7 +127,7 @@ import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 import {
   applyRhinoRouting,
-} from '@rhino-project/rhino-nestjs';
+} from '@rhino-dev/rhino-nestjs';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
