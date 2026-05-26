@@ -4,6 +4,10 @@
   "description": "Rhino for NestJS — auto-generated REST APIs from model definitions.",
   "author": "Bruno Cipolla <bruno@codalio.com>",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/rhino-project/rhino-nestjs.git"
+  },
   "publishConfig": {
     "access": "public"
   },
