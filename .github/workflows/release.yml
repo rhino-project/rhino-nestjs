@@ -120,14 +120,13 @@ jobs:
         # registry returns 404. Trusted publishing needs a clean .npmrc.
 
       - name: Upgrade npm to a version that supports Trusted Publishing
-        # npm Trusted Publisher + OIDC requires a recent npm. Node 22 ships
-        # with npm 10.x which is too old. Early TP releases (e.g. 11.5.2)
-        # have OIDC token-exchange bugs that cause the publish PUT to land
-        # unauthenticated (404), so install the latest. `npm install -g`
-        # via sudo does a fresh install and sidesteps the self-upgrade
-        # corruption bug (MODULE_NOT_FOUND: promise-retry).
+        # npm Trusted Publisher + OIDC requires npm >= 11.5.1; Node 22 ships
+        # npm 10.x. Do NOT use sudo here: `sudo npm install -g` installs to a
+        # root-owned prefix that is not on the runner user's PATH, so the old
+        # npm 10.x keeps running for `npm publish` (no OIDC → ENEEDAUTH/404).
+        # A plain user-level global install puts npm 11.x on PATH.
         run: |
-          sudo npm install -g npm@latest
+          npm install -g npm@latest
           npm --version
 
       - name: Derive expected version
