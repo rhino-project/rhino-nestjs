@@ -15,7 +15,7 @@
 #   3. Fill in:
 #        Publisher:     GitHub Actions
 #        Organization:  rhino-project
-#        Repository:    server-nestjs
+#        Repository:    rhino-nestjs
 #        Workflow:      release.yml       ← must match this filename
 #        Environment:   (leave blank)     ← simpler: no env claim to match
 #   4. Save.
@@ -117,14 +117,14 @@ jobs:
           cache: 'npm'
 
       - name: Upgrade npm to a version that supports Trusted Publishing
-        # npm Trusted Publisher + OIDC requires npm >= 11.5.1. Node 22 ships
-        # with npm 10.x which is too old. `npm install -g npm@latest` has a
-        # long-standing self-upgrade bug where it leaves the install in a
-        # corrupt state (MODULE_NOT_FOUND: promise-retry). Using sudo with
-        # a pinned version installs fresh and sidesteps the partial-state
-        # problem.
+        # npm Trusted Publisher + OIDC requires a recent npm. Node 22 ships
+        # with npm 10.x which is too old. Early TP releases (e.g. 11.5.2)
+        # have OIDC token-exchange bugs that cause the publish PUT to land
+        # unauthenticated (404), so install the latest. `npm install -g`
+        # via sudo does a fresh install and sidesteps the self-upgrade
+        # corruption bug (MODULE_NOT_FOUND: promise-retry).
         run: |
-          sudo npm install -g npm@11.5.2
+          sudo npm install -g npm@latest
           npm --version
 
       - name: Derive expected version
