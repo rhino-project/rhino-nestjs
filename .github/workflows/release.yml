@@ -20,45 +20,31 @@
 #        Environment:   (leave blank)     ← simpler: no env claim to match
 #   4. Save.
 #
-# Requirements:
-#   - npm >= 11.5.1 (setup-node@v4 installs a compatible version by default;
-#     we pin `npm-version: latest` to be explicit)
-#   - `id-token: write` permission on the publish job (OIDC handshake)
-#   - Trusted Publisher must be configured on EVERY package you publish
-#     under the scope (one per package).
+# How to cut a release (same mechanism as rhino-react):
 #
-# How to cut a release:
+#   # 1. Bump the version in package.json and commit to main
+#   npm version 4.1.0 --no-git-tag-version
+#   git commit -am "Bump version to 4.1.0"
+#   git push origin main
 #
-#   # 1. Bump the version in package.json and merge to main
-#   npm version 0.3.0 --no-git-tag-version
-#   git commit -am "chore: release v0.3.0"
-#   git push
+#   # 2. Create and push a release branch — this fires the workflow
+#   git checkout -b release/v4.1.0 main
+#   git push -u origin release/v4.1.0
 #
-#   # 2. Create a GitHub Release (UI or CLI)
-#   gh release create v0.3.0 --generate-notes
-#
-#   → This workflow fires, runs the full test matrix, verifies the
-#     package.json version matches the tag, builds, and publishes with
-#     provenance.
-#
-# For re-runs / emergency republishes: use the `workflow_dispatch` trigger
-# from the Actions tab.
+#   → The workflow runs the test matrix, verifies package.json matches the
+#     branch version, publishes to npm with provenance, and only then
+#     creates the git tag and GitHub Release.
 # -------------------------------------------------------------------------
 
 name: Release to npm (Trusted Publisher)
 
 on:
-  release:
-    types: [published]
-  workflow_dispatch:
-    inputs:
-      tag:
-        description: 'Tag to publish (e.g. v0.3.0). Leave blank to publish the version in package.json on the default branch.'
-        required: false
-        type: string
+  push:
+    branches:
+      - 'release/v*'
 
 concurrency:
-  group: npm-release-${{ github.event.release.tag_name || inputs.tag || 'dispatch' }}
+  group: npm-release-${{ github.ref_name }}
   cancel-in-progress: false
 
 jobs:
@@ -74,8 +60,6 @@ jobs:
         node: ['20', '22']
     steps:
       - uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event.release.tag_name || inputs.tag }}
 
       - name: Setup Node ${{ matrix.node }}
         uses: actions/setup-node@v4
@@ -93,21 +77,20 @@ jobs:
         run: npx jest --ci --runInBand
 
   # --------------------------------------------------------------------
-  # 2. Publish — gated on tests; uses OIDC (no NPM_TOKEN)
+  # 2. Publish — gated on tests; uses OIDC (no NPM_TOKEN). The git tag
+  #    and GitHub Release are created only AFTER a successful publish.
   # --------------------------------------------------------------------
-  publish:
-    name: Publish to npm
+  release:
+    name: Publish, then tag and release
     needs: tests
     runs-on: ubuntu-latest
 
     permissions:
-      contents: read
+      contents: write
       id-token: write # required for OIDC handshake with npm
 
     steps:
       - uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event.release.tag_name || inputs.tag }}
 
       - name: Setup Node 22
         uses: actions/setup-node@v4
@@ -129,27 +112,21 @@ jobs:
           npm install -g npm@latest
           npm --version
 
-      - name: Derive expected version
+      - name: Extract version from branch name
         id: version
         run: |
-          # Prefer the release tag (v0.3.0 → 0.3.0); fall back to package.json
-          # when running via workflow_dispatch without an input tag.
-          TAG="${{ github.event.release.tag_name || inputs.tag }}"
-          if [ -n "$TAG" ]; then
-            VERSION_NO_V="${TAG#v}"
-          else
-            VERSION_NO_V=$(node -p "require('./package.json').version")
-          fi
-          echo "tag=v$VERSION_NO_V" >> "$GITHUB_OUTPUT"
-          echo "bare=$VERSION_NO_V" >> "$GITHUB_OUTPUT"
+          VERSION="${GITHUB_REF_NAME#release/v}"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Releasing version: $VERSION"
 
-      - name: Verify package.json matches the release tag
+      - name: Verify package.json matches the release branch
         run: |
           PKG_VERSION=$(node -p "require('./package.json').version")
-          EXPECTED="${{ steps.version.outputs.bare }}"
+          EXPECTED="${{ steps.version.outputs.version }}"
           if [ "$PKG_VERSION" != "$EXPECTED" ]; then
-            echo "::error::package.json version ($PKG_VERSION) does not match release tag ($EXPECTED)"
-            echo "::error::Bump package.json to $EXPECTED and re-cut the release."
+            echo "::error::package.json version ($PKG_VERSION) does not match release branch ($EXPECTED)"
+            echo "::error::Bump package.json to $EXPECTED and re-cut the release branch."
             exit 1
           fi
           echo "✓ package.json @ $PKG_VERSION matches release $EXPECTED"
@@ -176,10 +153,23 @@ jobs:
         # a scoped publish token from the registry.
         run: npm publish --access public --provenance
 
+      - name: Create tag
+        run: |
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+          git tag "${{ steps.version.outputs.tag }}"
+          git push origin "${{ steps.version.outputs.tag }}"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: ${{ steps.version.outputs.tag }}
+          generate_release_notes: true
+
       - name: Summary
         run: |
           echo "## Published :rocket:" >> "$GITHUB_STEP_SUMMARY"
           echo "- Package: $(node -p "require('./package.json').name")" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Version: ${{ steps.version.outputs.bare }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Version: ${{ steps.version.outputs.version }}" >> "$GITHUB_STEP_SUMMARY"
           echo "- Provenance: attached (SLSA)" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Trigger: ${{ github.event_name }}" >> "$GITHUB_STEP_SUMMARY"
