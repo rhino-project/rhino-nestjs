@@ -81,6 +81,14 @@ export function resolveUserRoleSlug(user: any, organizationId: number | string |
  */
 export function resolveUserPermissions(user: any, organizationId?: number | string | null): string[] {
   if (!user) return [];
+  // Group-membership enforcement (design §6): when the membership layer has
+  // resolved the matching row(s), the permission source switches to that row
+  // only. The guard attaches the resolved list as `__membershipPermissions`.
+  // Absent (enforcement off) → fall through to the legacy heuristic, so
+  // existing behavior is byte-for-byte unchanged.
+  if (Array.isArray(user.__membershipPermissions)) {
+    return coercePermissions(user.__membershipPermissions);
+  }
   if (organizationId != null) {
     const userRoles = user.userRoles ?? user.user_roles ?? [];
     const all: string[] = [];

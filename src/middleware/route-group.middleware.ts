@@ -62,6 +62,13 @@ export class RouteGroupMiddleware implements NestMiddleware {
     let domainMatch:
       | { name: string; prefix: string; params: Record<string, string>; skipAuth?: boolean }
       | null = null;
+    // The empty-prefix, non-domain "default" group (e.g. `default`), if any. It
+    // serves every path that no more-specific prefix/domain group claims, so it
+    // is the fallback `__routeGroup` — making enforcement uniform: even the
+    // default group tags its routes with the group name (parity with
+    // Laravel/Rails). Without this, a null request-group matched ANY membership
+    // row (the route_group dimension was ignored). See FIX 3.
+    let defaultMatch: { name: string; prefix: string; skipAuth?: boolean } | null = null;
     // Tracks whether the URL path targeted a domain-scoped group whose host did
     // NOT match — used for wrong-host 404 enforcement.
     let blockedByHost = false;
@@ -104,8 +111,14 @@ export class RouteGroupMiddleware implements NestMiddleware {
       if (!prefix) {
         // Catch-all (empty-prefix) non-domain group: eligible for any path, so
         // a wrong-host domain group must not block requests it could serve. It
-        // does not itself become a __routeGroup match (preserves prior behavior).
+        // becomes the `__routeGroup` only as a FALLBACK (below) — a concrete
+        // prefix or domain group always wins. Recording it lets the default
+        // group tag its routes with the group name so membership enforcement
+        // is uniform across all groups (FIX 3).
         nonDomainEligible = true;
+        if (!defaultMatch) {
+          defaultMatch = { name, prefix, skipAuth: group.skipAuth };
+        }
         continue;
       }
       if (this.prefixMatches(url, prefix)) {
@@ -130,6 +143,17 @@ export class RouteGroupMiddleware implements NestMiddleware {
     if (prefixMatch) {
       req.__routeGroup = prefixMatch.name;
       if (prefixMatch.skipAuth) req.__skipAuth = true;
+      return next();
+    }
+
+    // Fallback: an empty-prefix, non-domain "default" group serves whatever no
+    // concrete prefix/domain group claimed. Tag the request with its name so
+    // the default group is a first-class membership dimension (FIX 3). A
+    // wrong-host domain group must not pre-empt a request this group can serve,
+    // so this also resolves the blockedByHost case below.
+    if (defaultMatch) {
+      req.__routeGroup = defaultMatch.name;
+      if (defaultMatch.skipAuth) req.__skipAuth = true;
       return next();
     }
 

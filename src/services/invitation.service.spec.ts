@@ -143,7 +143,7 @@ describe('InvitationService', () => {
     expect(res).toMatchObject({ accepted: true });
     expect(store[0].status).toBe('accepted');
     expect(userRole.create).toHaveBeenCalledWith({
-      data: { userId: 42, organizationId: 5, roleId: 9, permissions: [] },
+      data: { userId: 42, organizationId: 5, roleId: 9, routeGroup: null, permissions: [] },
     });
   });
 

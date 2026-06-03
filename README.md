@@ -182,6 +182,37 @@ That's it. You now have a full REST API for posts:
 | 26 | **Generator CLI** | `rhino install`, `rhino generate`, `rhino blueprint`. |
 | 27 | **Postman Export** | Auto-generated Postman Collection v2.1 with all endpoints. |
 | 28 | **Blueprint System** | YAML-to-code generation for models, migrations, policies, tests, and seeders. |
+| 29 | **Group Membership** | Opt-in `auth.enforceGroupMembership` makes a route group an access boundary. Memberships are keyed by `(user, route_group, organization, role)` on `user_roles`; a NULL `route_group` is a wildcard. No match → 403. Permissions then resolve from the matched membership row. |
+| 30 | **Group-Aware Auth & Lifecycle Hooks** | Per-group `auth: true` registers the auth route set under the group; per-group `hooks` (a provider implementing `AuthLifecycleHooks`) run `afterLogin/afterLogout/afterRegister/afterPasswordRecover/afterPasswordReset` and may reject (revoking the issued token). Invitations carry the `route_group`; accept populates the membership. See [Group-auth hooks & token revocation](#group-auth-hooks--token-revocation). |
+
+### Group-auth hooks & token revocation
+
+When a lifecycle hook **rejects** a token-issuing action (`afterLogin` /
+`afterRegister`), Rhino does two things:
+
+1. It **drops the issued token from the response** — the client never receives
+   it. This is the bounded, always-on guarantee.
+2. It **attempts to denylist the token** so a copy that already leaked can no
+   longer be used. This step requires a `RevokedToken` Prisma model
+   (`token`, `createdAt`). **If no `RevokedToken` model is configured, revoke is
+   advisory only** — Rhino logs a clear WARNING and the token simply isn't
+   denylisted. Because JWTs are stateless, you should therefore:
+
+   - Provision a `RevokedToken` model if you rely on hook rejection, **and**
+   - Use **short-TTL JWTs** (set `auth.jwtExpiresIn` to a small value) so an
+     un-denylisted token expires quickly.
+
+**Controlling the HTTP status from a hook:** a hook must throw
+`RhinoAuthRejected` (or any NestJS `HttpException`) to control the response
+status (default 403; the hook may set 401/409/etc.). A plain `Error` is **not**
+an `HttpException` and surfaces as a **500** after the token is revoked — so
+always throw `RhinoAuthRejected`/`HttpException`, never a bare `Error`, to reject.
+
+**Password recovery is never an enumeration oracle:** `afterPasswordRecover`
+runs for side effects only — a rejection it throws is swallowed so the recovery
+endpoint always returns the same uniform `{ success: true }` regardless of
+whether the email exists. (Reject semantics are kept for login/register/logout/
+reset.)
 
 ## Configuration Reference
 

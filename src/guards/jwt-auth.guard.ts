@@ -31,6 +31,9 @@ export class JwtAuthGuard implements CanActivate {
       throw RhinoException.unauthorized('Missing bearer token');
     }
     const payload = this.auth.verifyToken(token);
+    if (await this.auth.isTokenRevoked(token)) {
+      throw RhinoException.unauthorized('Token has been revoked');
+    }
     const userModel = this.config.authConfig().userModel;
     const delegate = this.prisma.model(userModel);
     const user = await delegate.findUnique({

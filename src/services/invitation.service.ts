@@ -6,12 +6,15 @@ import {
 import { randomBytes } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { RhinoConfigService } from '../rhino.config';
+import { RhinoException } from '../errors/rhino-exception';
 
 export interface CreateInvitationInput {
   email: string;
   roleId: number;
   organization: any;
   invitedBy: any;
+  /** The group the invitee will join (design §8). NULL = wildcard membership. */
+  routeGroup?: string | null;
 }
 
 /**
@@ -31,6 +34,20 @@ export class InvitationService {
 
   private generateToken(): string {
     return randomBytes(32).toString('hex'); // 64 hex chars
+  }
+
+  /** Whether the inviter holds a membership row for `routeGroup` (wildcard ok). */
+  private inviterIsMember(inviter: any, routeGroup: string, org: any): boolean {
+    const rows = inviter?.userRoles ?? inviter?.user_roles ?? [];
+    const orgId = org?.id ?? null;
+    for (const ur of rows) {
+      const rg = ur.routeGroup ?? ur.route_group ?? null;
+      if (rg !== null && String(rg) !== routeGroup) continue;
+      const rowOrg = ur.organizationId ?? ur.organization_id ?? null;
+      if (orgId != null && rowOrg != null && rowOrg !== orgId) continue;
+      return true;
+    }
+    return false;
   }
 
   private expiresAt(): Date {
@@ -54,12 +71,36 @@ export class InvitationService {
         throw new BadRequestException('Role not allowed for invitations');
       }
     }
+    const routeGroup = input.routeGroup ?? null;
+    // The `public` group has no auth, so it cannot be invited into (design §8).
+    if (routeGroup === 'public') {
+      throw new BadRequestException('Cannot invite into the public group');
+    }
+    // When enforcement is on, the inviter must themselves be a member of the
+    // group they are inviting into (design §8). NULL (wildcard) skips this — a
+    // wildcard inviter can invite into any group.
+    if (this.config.enforceGroupMembership() && routeGroup != null) {
+      if (!this.inviterIsMember(input.invitedBy, routeGroup, input.organization)) {
+        // Coarse membership denial → 403 for parity with Laravel/Rails
+        // (Decision 9.C), matching the controller's gate.
+        throw RhinoException.membershipDenied('You are not a member of that group');
+      }
+    }
+    // Tenant groups carry an org; non-tenant groups store a NULL org. Default
+    // to using the org (legacy behavior) — only drop it when enforcement is on
+    // AND the group is positively non-tenant, keeping flag-off paths unchanged.
+    const dropOrg =
+      this.config.enforceGroupMembership() &&
+      routeGroup != null &&
+      !this.config.isTenantGroup(routeGroup);
+    const organizationId = dropOrg ? null : input.organization?.id ?? null;
     const token = this.generateToken();
     const invitation = await this.delegate().create({
       data: {
-        organizationId: input.organization.id,
+        organizationId,
         email: input.email,
         roleId: input.roleId,
+        routeGroup,
         token,
         status: 'pending',
         invitedById: input.invitedBy.id,
@@ -112,6 +153,8 @@ export class InvitationService {
       throw new BadRequestException('Invitation expired');
     }
 
+    const routeGroup = inv.routeGroup ?? inv.route_group ?? null;
+
     if (!userId) {
       // User is unauthenticated — return org/role so client can register
       return {
@@ -119,14 +162,16 @@ export class InvitationService {
         organization: inv.organization,
         role: inv.role,
         email: inv.email,
+        routeGroup,
       };
     }
 
     await this.prisma.model('userRole').create({
       data: {
         userId,
-        organizationId: inv.organizationId,
+        organizationId: inv.organizationId ?? null,
         roleId: inv.roleId,
+        routeGroup,
         permissions: [],
       },
     });
@@ -134,6 +179,6 @@ export class InvitationService {
       where: { id: inv.id },
       data: { status: 'accepted', acceptedAt: new Date() },
     });
-    return { accepted: true, organization: inv.organization };
+    return { accepted: true, organization: inv.organization, routeGroup };
   }
 }

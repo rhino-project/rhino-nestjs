@@ -52,4 +52,74 @@ describe('AuthService', () => {
     const svc = setup({ findFirst: jest.fn().mockResolvedValue(null) });
     await expect(svc.login('x', 'nope')).rejects.toThrow(RhinoException);
   });
+
+  describe('token revocation', () => {
+    it('revokeToken records the token in the denylist when available', async () => {
+      const created: any[] = [];
+      const prisma = new PrismaService({
+        user: { findFirst: jest.fn() },
+        revokedToken: {
+          create: jest.fn(async (args: any) => {
+            created.push(args.data);
+            return args.data;
+          }),
+          findFirst: jest.fn(async (args: any) =>
+            created.find((r) => r.token === args.where.token) ?? null,
+          ),
+        },
+      } as any);
+      const config = new RhinoConfigService(normalizeConfig({ models: {}, auth: { jwtSecret: 't' } }));
+      const svc = new AuthService(prisma, config);
+      await svc.revokeToken('abc');
+      expect(created).toHaveLength(1);
+      expect(await svc.isTokenRevoked('abc')).toBe(true);
+      expect(await svc.isTokenRevoked('other')).toBe(false);
+    });
+
+    it('revokeToken logs a WARNING (not silent) when no denylist model exists', async () => {
+      const svc = setup({ findFirst: jest.fn() });
+      const warn = jest
+        .spyOn((svc as any).logger, 'warn')
+        .mockImplementation(() => undefined);
+      try {
+        await expect(svc.revokeToken('abc')).resolves.toBeUndefined();
+        expect(warn).toHaveBeenCalledTimes(1);
+        expect(warn.mock.calls[0][0]).toMatch(/RevokedToken/);
+        expect(await svc.isTokenRevoked('abc')).toBe(false);
+      } finally {
+        warn.mockRestore();
+      }
+    });
+
+    it('revokeToken WARNs once per attempt when the denylist write fails', async () => {
+      const prisma = new PrismaService({
+        user: { findFirst: jest.fn() },
+        revokedToken: {
+          create: jest.fn(async () => {
+            throw new Error('db down');
+          }),
+          findFirst: jest.fn(async () => null),
+        },
+      } as any);
+      const config = new RhinoConfigService(
+        normalizeConfig({ models: {}, auth: { jwtSecret: 't' } }),
+      );
+      const svc = new AuthService(prisma, config);
+      const warn = jest
+        .spyOn((svc as any).logger, 'warn')
+        .mockImplementation(() => undefined);
+      try {
+        await svc.revokeToken('abc');
+        expect(warn).toHaveBeenCalledTimes(1);
+        expect(warn.mock.calls[0][0]).toMatch(/failed to persist/);
+      } finally {
+        warn.mockRestore();
+      }
+    });
+
+    it('revokeToken ignores empty tokens', async () => {
+      const svc = setup({ findFirst: jest.fn() });
+      await expect(svc.revokeToken('')).resolves.toBeUndefined();
+    });
+  });
 });

@@ -93,4 +93,19 @@ describe('JwtAuthGuard', () => {
       guard.canActivate(makeCtx({ headers: { authorization: 123 as any } })),
     ).rejects.toMatchObject({ code: 'UNAUTHORIZED' });
   });
+
+  it('rejects a token that has been revoked (hook-rejected login/register)', async () => {
+    const user = { id: 1 };
+    const prisma = new PrismaService({
+      user: { findUnique: jest.fn().mockResolvedValue(user) },
+      revokedToken: { findFirst: jest.fn().mockResolvedValue({ id: 1 }) },
+    } as any);
+    const config = new RhinoConfigService(normalizeConfig({ models: {}, auth: { jwtSecret: 't' } }));
+    const auth = new AuthService(prisma, config);
+    const guard = new JwtAuthGuard(auth, prisma, config);
+    const token = auth.signToken({ sub: 1 });
+    await expect(
+      guard.canActivate(makeCtx({ headers: { authorization: `Bearer ${token}` } })),
+    ).rejects.toMatchObject({ code: 'UNAUTHORIZED' });
+  });
 });

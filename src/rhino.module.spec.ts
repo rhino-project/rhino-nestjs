@@ -235,4 +235,46 @@ describe('RhinoModule', () => {
     const config = moduleRef.get(RhinoConfigService);
     expect(config.hasModel('comments')).toBe(true);
   });
+
+  describe('group-auth wiring', () => {
+    it('resolves AuthHooksService and MembershipService from DI', async () => {
+      const moduleRef = await Test.createTestingModule({
+        imports: [RhinoModule.forRoot({ models: { posts: { model: 'post' } } })],
+      }).compile();
+      const { AuthHooksService } = require('./services/auth-hooks.service');
+      const { MembershipService } = require('./services/membership.service');
+      expect(moduleRef.get(AuthHooksService)).toBeDefined();
+      expect(moduleRef.get(MembershipService)).toBeDefined();
+    });
+
+    it('registers per-group hooks classes as providers (resolvable by DI)', async () => {
+      const { Injectable: Inj } = require('@nestjs/common');
+      @Inj()
+      class DriverHooks {
+        afterLogin() {}
+      }
+      const moduleRef = await Test.createTestingModule({
+        imports: [
+          RhinoModule.forRoot({
+            models: { posts: { model: 'post' } },
+            routeGroups: { driver: { prefix: 'driver', auth: true, hooks: DriverHooks, models: '*' } },
+          }),
+        ],
+      }).compile();
+      expect(moduleRef.get(DriverHooks)).toBeInstanceOf(DriverHooks);
+    });
+
+    it('autoMembershipGuard installs GroupMembershipGuard as APP_GUARD', async () => {
+      const moduleRef = await Test.createTestingModule({
+        imports: [
+          RhinoModule.forRoot(
+            { models: { posts: { model: 'post' } } },
+            { autoMembershipGuard: true },
+          ),
+        ],
+      }).compile();
+      const { GroupMembershipGuard } = require('./guards/group-membership.guard');
+      expect(moduleRef.get(GroupMembershipGuard)).toBeDefined();
+    });
+  });
 });

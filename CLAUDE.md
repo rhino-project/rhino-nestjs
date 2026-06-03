@@ -97,6 +97,33 @@ This library provides the following features. When modifying or extending any of
 | 26 | **Generator CLI** | `cli/commands/install.command.ts` |
 | 27 | **Postman Export** | `exporters/postman-exporter.ts` |
 | 28 | **Blueprint System** | `blueprint/blueprint-parser.ts`, `blueprint/generators/` |
+| 29 | **Group Membership** (opt-in via `auth.enforceGroupMembership`) | `services/membership.service.ts`, `guards/group-membership.guard.ts`, `utils/permission-matcher.ts` |
+| 30 | **Group-Aware Auth & Lifecycle Hooks** | `controllers/auth.controller.ts`, `services/auth-hooks.service.ts`, `rhino-config.interface.ts` (`AuthLifecycleHooks`, per-group `auth`/`hooks`), `services/invitation.service.ts` (`route_group`) |
+
+### Group-auth hooks & token revocation (feature 30) — operator notes
+
+- **Token revocation is advisory unless a `RevokedToken` model exists.** On hook
+  rejection of `afterLogin`/`afterRegister`, the controller always drops the
+  token from the response (the bounded guarantee) and *attempts* to denylist it
+  via a `RevokedToken` Prisma model (`token`, `createdAt`). With no such model,
+  `AuthService.revokeToken` logs a WARNING and skips the denylist — so consumers
+  relying on revocation MUST provision `RevokedToken` **and** use short-TTL JWTs
+  (`auth.jwtExpiresIn`).
+- **Hooks must throw `RhinoAuthRejected`/`HttpException` to control status.** A
+  plain `Error` is not an `HttpException` → it becomes a 500 (after the token is
+  revoked). Default reject status is 403.
+- **`afterPasswordRecover` must never become an enumeration oracle.** Its
+  rejection is swallowed in the controller so the recovery endpoint's response
+  is uniform whether or not the email exists. Reject semantics are preserved for
+  login/register/logout/reset.
+- **Invitation authorization** (`controllers/invitation.controller.ts`): under
+  enforcement, a coarse membership gate (inviter must be a member of the target
+  group — **403** on denial, NULL row = wildcard) runs first, then the normal
+  permission check. A forged/unknown `routeGroup` (not configured, not `public`)
+  is rejected with **422** regardless of enforcement.
+- **Default group is a first-class membership dimension.** `RouteGroupMiddleware`
+  resolves `__routeGroup` to the empty-prefix/default group's name (not
+  `undefined`), so membership enforcement applies uniformly to it.
 
 ## Running Tests
 

@@ -13,7 +13,9 @@ export type RhinoErrorCode =
   | 'INVITATION_USED'
   | 'INVITATION_INVALID_ROLE'
   | 'NESTED_OPERATION_FAILED'
-  | 'INCLUDE_NOT_AUTHORIZED';
+  | 'INCLUDE_NOT_AUTHORIZED'
+  | 'AUTH_REJECTED'
+  | 'MEMBERSHIP_DENIED';
 
 export interface RhinoErrorBody {
   code: RhinoErrorCode;
@@ -70,5 +72,25 @@ export class RhinoException extends HttpException {
 
   static includeNotAuthorized(slug: string): RhinoException {
     return new RhinoException('INCLUDE_NOT_AUTHORIZED', `Include not authorized: ${slug}`, 403, { slug });
+  }
+
+  static authRejected(message = 'Authentication rejected', status = 403): RhinoException {
+    return new RhinoException('AUTH_REJECTED', message, status);
+  }
+
+  static membershipDenied(message = 'You are not a member of this group.'): RhinoException {
+    return new RhinoException('MEMBERSHIP_DENIED', message, 403);
+  }
+}
+
+/**
+ * Thrown by a lifecycle hook to reject an otherwise-successful auth action.
+ * The controller catches it: for token-issuing actions (login/register) the
+ * just-issued token is revoked; the configured `status` (default 403) is then
+ * returned to the client. A hook may also throw any other error.
+ */
+export class RhinoAuthRejected extends RhinoException {
+  constructor(message = 'Authentication rejected', status = 403) {
+    super('AUTH_REJECTED', message, status);
   }
 }

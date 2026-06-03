@@ -4,6 +4,7 @@ export { RhinoModule, type RhinoModuleOptions } from './rhino.module';
 // Errors
 export {
   RhinoException,
+  RhinoAuthRejected,
   type RhinoErrorCode,
   type RhinoErrorBody,
 } from './errors/rhino-exception';
@@ -31,6 +32,7 @@ export { ResourcePolicy } from './policies/resource-policy';
 // Guards
 export { JwtAuthGuard } from './guards/jwt-auth.guard';
 export { ResourcePolicyGuard } from './guards/resource-policy.guard';
+export { GroupMembershipGuard } from './guards/group-membership.guard';
 
 // Interceptors
 export { ResponseInterceptor, paginated } from './interceptors/response.interceptor';
@@ -63,6 +65,11 @@ export { ValidationService } from './services/validation.service';
 export { AuditService } from './services/audit.service';
 export { AuthService } from './services/auth.service';
 export { InvitationService } from './services/invitation.service';
+export { AuthHooksService, type AuthHookEvent } from './services/auth-hooks.service';
+export {
+  MembershipService,
+  type MembershipRow,
+} from './services/membership.service';
 export { NestedService } from './services/nested.service';
 export { OrganizationService } from './services/organization.service';
 export { ScopeService, type RhinoScope } from './services/scope.service';

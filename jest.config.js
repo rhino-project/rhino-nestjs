@@ -4,6 +4,7 @@ module.exports = {
   testEnvironment: 'node',
   rootDir: '.',
   roots: ['<rootDir>/src', '<rootDir>/test'],
+  setupFilesAfterEnv: ['<rootDir>/test/jest.setup.ts'],
   testRegex: '.*\\.(spec|test|e2e-spec)\\.ts$',
   transform: {
     '^.+\\.(t|j)s$': ['ts-jest', { tsconfig: 'tsconfig.json' }],

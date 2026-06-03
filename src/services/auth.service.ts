@@ -84,7 +84,65 @@ export class AuthService {
     // JWT stateless; consumer can add blacklist logic via hooks.
   }
 
-  async requestPasswordRecovery(email: string): Promise<{ token: string } | null> {
+  /**
+   * Revoke a just-issued token. JWTs are stateless, so "revoking" means
+   * recording the token in a denylist (when the consumer provides a
+   * `RevokedToken` model) so the JwtAuthGuard can reject it on the next
+   * request. Used when a lifecycle hook rejects a login/register: the token is
+   * never returned AND — IF a denylist model exists — can no longer be used
+   * even if it leaked.
+   *
+   * Bounded guarantee: the caller (AuthController) ALWAYS drops the token from
+   * the response on rejection, so an attacker never receives it. Persisting it
+   * to a denylist is the *additional* protection against a leaked token. When
+   * no `RevokedToken` model is configured we log a clear WARNING so operators
+   * know revoke is advisory-only — pair it with short-TTL JWTs (see README /
+   * CLAUDE.md "Group-auth hooks & token revocation").
+   */
+  async revokeToken(token: string): Promise<void> {
+    if (!token) return;
+    let delegate: any;
+    try {
+      delegate = this.prisma.model('revokedToken');
+    } catch {
+      this.logger.warn(
+        'AuthService.revokeToken: no `RevokedToken` model is configured, so token ' +
+          'revocation is advisory only — the token is dropped from the response but ' +
+          'cannot be denylisted if it has already leaked. Add a `RevokedToken` model ' +
+          '(token, createdAt) to your Prisma schema and use short-TTL JWTs.',
+      );
+      return;
+    }
+    try {
+      await delegate.create({ data: { token, createdAt: new Date() } });
+    } catch (err) {
+      // The model exists but the write failed — surface it so a misconfigured
+      // denylist is not silently a no-op.
+      this.logger.warn(
+        `AuthService.revokeToken: failed to persist revoked token (${(err as Error).message}).`,
+      );
+    }
+  }
+
+  /** Whether a token has been revoked via {@link revokeToken}. */
+  async isTokenRevoked(token: string): Promise<boolean> {
+    if (!token) return false;
+    let delegate: any;
+    try {
+      delegate = this.prisma.model('revokedToken');
+    } catch {
+      // No denylist model — nothing can be revoked, so nothing is revoked.
+      return false;
+    }
+    try {
+      const row = await delegate.findFirst({ where: { token } });
+      return Boolean(row);
+    } catch {
+      return false;
+    }
+  }
+
+  async requestPasswordRecovery(email: string): Promise<{ token: string; user: any } | null> {
     const user = await this.userDelegate().findFirst({ where: { email } }).catch(() => null);
     if (!user) return null;
     const token = randomBytes(32).toString('hex');
@@ -100,7 +158,7 @@ export class AuthService {
           'Add a `PasswordResetToken` model to your Prisma schema to enable this feature.',
       );
     }
-    return { token };
+    return { token, user };
   }
 
   async resetPassword(email: string, token: string, newPassword: string): Promise<void> {

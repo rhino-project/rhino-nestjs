@@ -25,6 +25,36 @@ describe('RouteGroupMiddleware', () => {
     expect(req.__skipAuth).toBeUndefined();
   });
 
+  // FIX 3: the empty-prefix "default" group must resolve to its own name so the
+  // default group is a first-class membership dimension (parity with
+  // Laravel/Rails). Previously __routeGroup was left undefined for it.
+  it('resolves __routeGroup to the empty-prefix default group when no other matches', () => {
+    const mw = makeMw({ default: { models: '*' } });
+    const req: any = { originalUrl: '/api/posts' };
+    const next = jest.fn();
+    mw.use(req, {} as any, next);
+    expect(req.__routeGroup).toBe('default');
+    expect(next).toHaveBeenCalledWith();
+  });
+
+  it('a concrete prefix group still wins over the empty-prefix default group', () => {
+    const mw = makeMw({
+      default: { models: '*' },
+      admin: { prefix: 'admin', models: '*' },
+    });
+    const req: any = { originalUrl: '/api/admin/posts' };
+    mw.use(req, {} as any, jest.fn());
+    expect(req.__routeGroup).toBe('admin');
+  });
+
+  it('propagates skipAuth from the default group fallback', () => {
+    const mw = makeMw({ default: { models: '*', skipAuth: true } });
+    const req: any = { originalUrl: '/api/posts' };
+    mw.use(req, {} as any, jest.fn());
+    expect(req.__routeGroup).toBe('default');
+    expect(req.__skipAuth).toBe(true);
+  });
+
   it('ignores dynamic :organization prefixes', () => {
     const mw = makeMw({
       tenant: { prefix: ':organization', models: '*' },

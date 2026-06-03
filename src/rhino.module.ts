@@ -31,8 +31,11 @@ import { NestedService } from './services/nested.service';
 import { ScopeService } from './services/scope.service';
 import { AuthService } from './services/auth.service';
 import { InvitationService } from './services/invitation.service';
+import { AuthHooksService } from './services/auth-hooks.service';
+import { MembershipService } from './services/membership.service';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { ResourcePolicyGuard } from './guards/resource-policy.guard';
+import { GroupMembershipGuard } from './guards/group-membership.guard';
 import { GlobalController } from './controllers/global.controller';
 import { AuthController } from './controllers/auth.controller';
 import { InvitationController } from './controllers/invitation.controller';
@@ -84,6 +87,12 @@ export interface RhinoModuleOptions {
   autoModelMiddleware?: boolean;
   /** Wire ResolveOrganizationMiddleware for all routes when multiTenant enabled. Default true. */
   autoTenantMiddleware?: boolean;
+  /**
+   * Install GroupMembershipGuard globally as APP_GUARD. Default false (opt-in).
+   * The guard is a no-op unless `auth.enforceGroupMembership` is on, so this is
+   * safe to enable alongside `autoAuthGuard` when using group membership.
+   */
+  autoMembershipGuard?: boolean;
 }
 
 /**
@@ -163,6 +172,7 @@ export class RhinoModule implements NestModule {
   ): DynamicModule {
     const normalized = normalizeConfig(config);
     const middlewareFromConfig = RhinoModule.collectModelMiddleware(normalized);
+    const hookClasses = RhinoModule.collectHookClasses(normalized);
     return RhinoModule.build({
       configProviders: [
         { provide: RHINO_CONFIG, useValue: normalized },
@@ -174,6 +184,7 @@ export class RhinoModule implements NestModule {
       imports: [],
       options,
       middlewareClasses: middlewareFromConfig,
+      hookClasses,
     });
   }
 
@@ -208,10 +219,12 @@ export class RhinoModule implements NestModule {
     imports: any[];
     options: RhinoModuleOptions;
     middlewareClasses: Type<any>[];
+    hookClasses?: Type<any>[];
   }): DynamicModule {
     const opts = args.options;
     const guardProviders: Provider[] = [];
     if (opts.autoAuthGuard) guardProviders.push({ provide: APP_GUARD, useClass: JwtAuthGuard });
+    if (opts.autoMembershipGuard) guardProviders.push({ provide: APP_GUARD, useClass: GroupMembershipGuard });
     if (opts.autoPolicyGuard) guardProviders.push({ provide: APP_GUARD, useClass: ResourcePolicyGuard });
 
     return {
@@ -226,9 +239,10 @@ export class RhinoModule implements NestModule {
         ...RhinoModule.coreProviders(),
         JwtAuthGuard,
         ResourcePolicyGuard,
+        GroupMembershipGuard,
         RouteGroupMiddleware,
         ResolveOrganizationMiddleware,
-        ...dedupeTypes(args.middlewareClasses),
+        ...dedupeTypes([...args.middlewareClasses, ...(args.hookClasses ?? [])]),
         ...guardProviders,
       ],
       exports: RhinoModule.coreExports(),
@@ -260,7 +274,18 @@ export class RhinoModule implements NestModule {
       ScopeService,
       AuthService,
       InvitationService,
+      AuthHooksService,
+      MembershipService,
     ];
+  }
+
+  private static collectHookClasses(config: RhinoConfig): Type<any>[] {
+    const set = new Set<Type<any>>();
+    for (const group of Object.values(config.routeGroups ?? {})) {
+      const hooks = group.hooks;
+      if (hooks && typeof hooks === 'function') set.add(hooks as Type<any>);
+    }
+    return Array.from(set);
   }
 
   private static coreExports() {
@@ -281,8 +306,11 @@ export class RhinoModule implements NestModule {
       ScopeService,
       AuthService,
       InvitationService,
+      AuthHooksService,
+      MembershipService,
       JwtAuthGuard,
       ResourcePolicyGuard,
+      GroupMembershipGuard,
     ];
   }
 }
