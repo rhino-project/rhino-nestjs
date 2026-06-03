@@ -259,6 +259,8 @@ routeGroups: {
 
 Host-based matching is performed by `RouteGroupMiddleware`. For subdomain → organization resolution at the Express layer (analogous to `createTenantRouteRewrite`), use `createDomainRouteResolver({ prisma, config })` in `main.ts` before `applyRhinoRouting(...)`.
 
+> **Conflicting groups fail fast.** Two groups that share the same prefix **and** overlapping models **and** an intersecting host-set would silently shadow each other. `normalizeConfig` (run by `RhinoModule.forRoot`) throws `RouteGroupConflictError` in that case. Fix it with distinct prefixes, different `domain` values, or disjoint `models`. A group without a `domain` matches every host, so it intersects with all others.
+
 **Reserved group names:**
 
 | Name | Behavior |

@@ -5,6 +5,7 @@ import type {
   ModelRegistration,
   RouteGroupConfig,
 } from './interfaces/rhino-config.interface';
+import { validateRouteGroups } from './utils/route-group-validator';
 
 /**
  * Injectable accessor for the consuming app's Rhino configuration.
@@ -94,7 +95,7 @@ export class RhinoConfigService {
  * Normalize a raw config value (defaults applied) — used by the module in forRoot.
  */
 export function normalizeConfig(config: RhinoConfig): RhinoConfig {
-  return {
+  const normalized: RhinoConfig = {
     ...config,
     models: config.models ?? {},
     routeGroups: config.routeGroups ?? {},
@@ -118,4 +119,10 @@ export function normalizeConfig(config: RhinoConfig): RhinoConfig {
       ...(config.auth ?? {}),
     },
   };
+
+  // Fail fast on route groups that would silently shadow each other (same
+  // prefix + intersecting host-set + overlapping models).
+  validateRouteGroups(normalized);
+
+  return normalized;
 }

@@ -100,6 +100,10 @@ export {
   type CompiledDomain,
   type DomainMatch,
 } from './utils/domain-pattern';
+export {
+  validateRouteGroups,
+  RouteGroupConflictError,
+} from './utils/route-group-validator';
 export { autoDiscoverScopes, type ScopeDiscoveryOptions } from './utils/scope-discovery';
 export { defineModel, type ModelDefinition } from './utils/model-builder';
 export {
