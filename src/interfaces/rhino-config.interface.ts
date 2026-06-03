@@ -37,6 +37,18 @@ export interface ModelRegistration {
 
 export interface RouteGroupConfig {
   prefix?: string;
+  /**
+   * Constrain this group to a specific host. Two groups can then share the
+   * same URL prefix and be selected by host.
+   *
+   *   - Omitted → the group matches any host (default; backward compatible).
+   *   - Literal host, e.g. `'admin.example.com'` → requests to that host
+   *     resolve to this group; requests from a non-matching host are rejected.
+   *   - Parameterized host, e.g. `'{organization}.example.com'` → the captured
+   *     `{organization}` subdomain feeds organization resolution, exactly like
+   *     a path-prefix tenant param. Matches Laravel's `Route::domain(...)`.
+   */
+  domain?: string;
   middleware?: Type<NestMiddleware>[];
   /** '*' = all registered models, array = subset by slug */
   models: '*' | string[];

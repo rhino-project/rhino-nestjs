@@ -84,7 +84,7 @@ This library provides the following features. When modifying or extending any of
 | 13 | **Eager Loading** | `query-builder.service.ts` (`buildInclude`) |
 | 14 | **Multi-Tenancy** | `organization.service.ts`, `resolve-organization.middleware.ts`, `resource.service.ts` |
 | 15 | **Nested Ownership** | `resource.service.ts` (`orgFilter`) |
-| 16 | **Route Groups** | `rhino-config.interface.ts`, `route-registration.service.ts` |
+| 16 | **Route Groups** (incl. domain-aware groups via per-group `domain`) | `rhino-config.interface.ts`, `route-registration.service.ts`, `middleware/route-group.middleware.ts`, `middleware/domain-route-resolver.ts`, `utils/domain-pattern.ts` |
 | 17 | **Soft Deletes** | `resource.service.ts`, `global.controller.ts` |
 | 18 | **Audit Trail** | `audit.service.ts`, `global.controller.ts` |
 | 19 | **Nested Operations** | `nested.controller.ts`, `nested.service.ts` |

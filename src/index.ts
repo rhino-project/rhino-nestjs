@@ -43,6 +43,10 @@ export {
   createTenantRouteRewrite,
   type TenantRouteRewriteOptions,
 } from './middleware/tenant-route-rewrite';
+export {
+  createDomainRouteResolver,
+  type DomainRouteResolverOptions,
+} from './middleware/domain-route-resolver';
 
 // Controllers (consuming apps can re-export under their own routes)
 export { GlobalController } from './controllers/global.controller';
@@ -90,6 +94,12 @@ export {
   userHasPermission,
 } from './utils/permission-matcher';
 export { formatPrice, type CurrencyCode } from './utils/format';
+export {
+  compileDomain,
+  matchDomain,
+  type CompiledDomain,
+  type DomainMatch,
+} from './utils/domain-pattern';
 export { autoDiscoverScopes, type ScopeDiscoveryOptions } from './utils/scope-discovery';
 export { defineModel, type ModelDefinition } from './utils/model-builder';
 export {

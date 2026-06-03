@@ -40,6 +40,7 @@ export function describeRoutes(config: RhinoConfigService): Array<{
   group: string;
   slug: string;
   prefix: string;
+  domain: string | null;
   model: string;
   softDeletes: boolean;
   hasAuditTrail: boolean;
@@ -60,6 +61,7 @@ export function describeRoutes(config: RhinoConfigService): Array<{
         group: name,
         slug,
         prefix: group.prefix ?? '',
+        domain: group.domain ?? null,
         model: reg.model,
         softDeletes: !!reg.softDeletes,
         hasAuditTrail: !!reg.hasAuditTrail,
@@ -73,6 +75,7 @@ export function describeRoutes(config: RhinoConfigService): Array<{
         group: '(default)',
         slug,
         prefix: '',
+        domain: null,
         model: reg.model,
         softDeletes: !!reg.softDeletes,
         hasAuditTrail: !!reg.hasAuditTrail,

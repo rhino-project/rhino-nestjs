@@ -40,5 +40,35 @@ describe('describeRoutes', () => {
     );
     const routes = describeRoutes(cfg);
     expect(routes[0].group).toBe('(default)');
+    expect(routes[0].domain).toBeNull();
+  });
+
+  it('includes the group domain in the output', () => {
+    const cfg = new RhinoConfigService(
+      normalizeConfig({
+        models: { posts: { model: 'post' } },
+        routeGroups: {
+          admin: { domain: 'admin.example.com', models: '*' },
+          tenant: { domain: '{organization}.example.com', prefix: 'v1', models: ['posts'] },
+        },
+      }),
+    );
+    const routes = describeRoutes(cfg);
+    const admin = routes.find((r) => r.group === 'admin');
+    const tenant = routes.find((r) => r.group === 'tenant');
+    expect(admin?.domain).toBe('admin.example.com');
+    expect(tenant?.domain).toBe('{organization}.example.com');
+    expect(tenant?.prefix).toBe('v1');
+  });
+
+  it('reports domain as null for groups without one', () => {
+    const cfg = new RhinoConfigService(
+      normalizeConfig({
+        models: { posts: { model: 'post' } },
+        routeGroups: { public: { prefix: 'public', models: '*' } },
+      }),
+    );
+    const routes = describeRoutes(cfg);
+    expect(routes[0].domain).toBeNull();
   });
 });

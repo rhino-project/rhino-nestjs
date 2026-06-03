@@ -169,7 +169,7 @@ That's it. You now have a full REST API for posts:
 | 13 | **Eager Loading** | `?include=author,comments` with nested dot-notation. |
 | 14 | **Multi-Tenancy** | Organization-based data isolation, auto-set `organizationId`, request scoping. |
 | 15 | **Nested Ownership** | Auto-scopes by `organizationId` on the registered model. |
-| 16 | **Route Groups** | Multiple URL prefixes with different middleware/auth (`tenant`, `public`, custom). |
+| 16 | **Route Groups** | Multiple URL prefixes with different middleware/auth (`tenant`, `public`, custom). Optional per-group `domain` constrains a group to a host (literal or `{organization}.example.com` subdomain). |
 | 17 | **Soft Deletes** | Trash, restore, force-delete endpoints with individual permissions. |
 | 18 | **Audit Trail** | Logs all CRUD events with old/new values, user, IP, and org context. |
 | 19 | **Nested Operations** | `POST /nested` for atomic multi-model transactions with `$N.field` references. |
@@ -238,8 +238,26 @@ routeGroups: {
     models: ['posts'],
     skipAuth: true,
   },
+  // Domain-aware groups: constrain a group to a specific host. Two groups can
+  // share the same prefix and be selected by host.
+  admin: {
+    domain: 'admin.example.com', // literal host — only this host serves this group
+    models: '*',
+  },
+  hostTenant: {
+    domain: '{organization}.example.com', // parameterized host — the captured
+    models: '*',                          // {organization} subdomain resolves the
+  },                                      // tenant, just like the :organization prefix
 }
 ```
+
+**`domain` (per-group, optional):**
+
+- Omitted → the group matches any host (default; backward compatible).
+- Literal host (`'admin.example.com'`) → only requests to that host resolve to the group; a wrong-host request to the group's models is rejected with `404`.
+- Parameterized host (`'{organization}.example.com'`) → the captured `{organization}` subdomain feeds organization resolution (subdomain multitenancy), exactly like the `:organization` path prefix. Mirrors Laravel's `Route::domain(...)`.
+
+Host-based matching is performed by `RouteGroupMiddleware`. For subdomain → organization resolution at the Express layer (analogous to `createTenantRouteRewrite`), use `createDomainRouteResolver({ prisma, config })` in `main.ts` before `applyRhinoRouting(...)`.
 
 **Reserved group names:**
 
