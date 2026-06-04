@@ -389,6 +389,114 @@ describe('RouteGroupMiddleware', () => {
         expect(req.__domainParams).toEqual({ organization: 'acme' });
       });
 
+      // -----------------------------------------------------------------
+      // FIX 11.1 — auth entry paths resolve to the right/default auth group
+      // and ALWAYS keep __skipAuth, even when a host-claiming empty-prefix
+      // domain group exists (the NestJS analogue of §11.1).
+      // -----------------------------------------------------------------
+      describe('FIX 11.1: auth-path resolution under a host-claiming empty-prefix domain group', () => {
+        it('keeps __skipAuth and the default auth group when an empty-prefix domain group claims the host', () => {
+          const mw = makeMw({
+            // empty-prefix domain group: matches the host AND every path, so it
+            // used to win /api/auth/login away from the default group.
+            tenant: { domain: '{organization}.example.com', auth: true, models: '*' },
+            // the legacy/global auth group (empty prefix, no domain)
+            default: { auth: true, models: '*' },
+          });
+          const req: any = {
+            originalUrl: '/api/auth/login',
+            hostname: 'acme.example.com',
+            params: {},
+          };
+          const next = jest.fn();
+          mw.use(req, {} as any, next);
+          // The auth-enabled DOMAIN group matches the host, so it wins the auth
+          // route for that host — but __skipAuth must remain set regardless.
+          expect(req.__routeGroup).toBe('tenant');
+          expect(req.__skipAuth).toBe(true);
+          expect(next).toHaveBeenCalledWith();
+        });
+
+        it('falls back to the empty-prefix default auth group when the host matches no domain group', () => {
+          const mw = makeMw({
+            admin: { domain: 'admin.example.com', auth: true, models: '*' },
+            default: { auth: true, models: '*' },
+          });
+          const req: any = {
+            originalUrl: '/api/auth/login',
+            hostname: 'app.somewhere.com',
+            params: {},
+          };
+          const next = jest.fn();
+          mw.use(req, {} as any, next);
+          expect(req.__routeGroup).toBe('default');
+          expect(req.__skipAuth).toBe(true);
+          expect(next).toHaveBeenCalledWith();
+        });
+
+        it('resolves the auth group by URL prefix and keeps __skipAuth', () => {
+          const mw = makeMw({
+            driver: { prefix: 'driver', auth: true, models: '*' },
+            default: { auth: true, models: '*' },
+          });
+          const req: any = { originalUrl: '/api/driver/auth/login' };
+          const next = jest.fn();
+          mw.use(req, {} as any, next);
+          expect(req.__routeGroup).toBe('driver');
+          expect(req.__skipAuth).toBe(true);
+        });
+
+        it('covers register / logout / password recover+reset entry paths', () => {
+          const mw = makeMw({ default: { auth: true, models: '*' } });
+          for (const path of [
+            '/api/auth/register',
+            '/api/auth/logout',
+            '/api/auth/password/recover',
+            '/api/auth/password/reset',
+          ]) {
+            const req: any = { originalUrl: path };
+            mw.use(req, {} as any, jest.fn());
+            expect(req.__skipAuth).toBe(true);
+            expect(req.__routeGroup).toBe('default');
+          }
+        });
+
+        it('an empty-prefix domain group adopts the auth route on a NON-auth path normally (no skipAuth leak)', () => {
+          // Regression guard: the FIX-11.1 branch only triggers on auth paths.
+          const mw = makeMw({
+            tenant: { domain: '{organization}.example.com', auth: true, models: '*' },
+            default: { auth: true, models: '*' },
+          });
+          const req: any = {
+            originalUrl: '/api/posts',
+            hostname: 'acme.example.com',
+            params: {},
+          };
+          mw.use(req, {} as any, jest.fn());
+          expect(req.__routeGroup).toBe('tenant');
+          // Non-auth data path: skipAuth must NOT be set (group isn't skipAuth).
+          expect(req.__skipAuth).toBeUndefined();
+        });
+
+        it('no-auth-group app: auth path is unchanged (no forced skipAuth, normal resolution)', () => {
+          // No group has auth: true → the FIX-11.1 branch is inert; behavior is
+          // byte-for-byte the legacy resolution.
+          const mw = makeMw({ admin: { prefix: 'admin', models: '*' } });
+          const req: any = { originalUrl: '/api/auth/login' };
+          mw.use(req, {} as any, jest.fn());
+          expect(req.__routeGroup).toBeUndefined();
+          expect(req.__skipAuth).toBeUndefined();
+        });
+
+        it('does not false-match a sub-word path like /api/authority/login', () => {
+          const mw = makeMw({ default: { auth: true, models: '*' } });
+          const req: any = { originalUrl: '/api/authors/login' };
+          mw.use(req, {} as any, jest.fn());
+          // `authors/login` is not an `auth/...` entry path.
+          expect(req.__skipAuth).toBeUndefined();
+        });
+      });
+
       it('still ignores dynamic :organization prefixes (no domains configured)', () => {
         const mw = makeMw({
           tenant: { prefix: ':organization', models: '*' },

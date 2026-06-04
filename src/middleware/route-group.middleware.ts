@@ -54,6 +54,18 @@ export class RouteGroupMiddleware implements NestMiddleware {
     const host = this.resolveHost(req);
     const groups = this.config.routeGroups();
 
+    // FIX 11.1 (auth-path resolution): an auth entry path (login/logout/
+    // register/password recover|reset) must resolve to the auth-enabled group
+    // that matches this host/prefix, falling back to the empty-prefix/default
+    // group, and must ALWAYS keep `__skipAuth` so the JWT guard never blocks
+    // login/register/recover. A host-claiming empty-prefix DOMAIN group (which
+    // matches every path) must NOT win the auth path away from the group it
+    // belongs to. This branch is a no-op for apps with no auth-enabled group.
+    if (this.isAuthEntryPath(url) && this.config.authEnabledGroups().length > 0) {
+      this.resolveAuthEntry(req, url, host, groups);
+      return next();
+    }
+
     // NOTE: never mutate `req.__skipAuth` inside this loop. Candidate matches
     // record their group's `skipAuth` flag and the winning match applies it
     // exactly once below, so a losing prefix group can't leak skipAuth onto a
@@ -167,6 +179,97 @@ export class RouteGroupMiddleware implements NestMiddleware {
     }
 
     next();
+  }
+
+  /**
+   * Whether `url` targets one of the auth entry endpoints. These are the
+   * routes that must never be blocked by the JWT guard (login/register/recover)
+   * and that must resolve to the group they belong to. Matches the auth
+   * controller's `@Controller('auth')` action paths under any prefix.
+   */
+  private isAuthEntryPath(url: string): boolean {
+    return (
+      /(^|\/)auth\/login(\/|$)/.test(url) ||
+      /(^|\/)auth\/logout(\/|$)/.test(url) ||
+      /(^|\/)auth\/register(\/|$)/.test(url) ||
+      /(^|\/)auth\/password\/[^/]+(\/|$)/.test(url)
+    );
+  }
+
+  /**
+   * Resolve the route group for an auth entry path (FIX 11.1). Precedence:
+   *   1. an auth-enabled DOMAIN group whose host matches (and prefix matches);
+   *   2. an auth-enabled PREFIX group whose prefix matches;
+   *   3. the empty-prefix / default group (auth-enabled preferred, else any);
+   *   4. otherwise leave `__routeGroup` unset (legacy/global auth path).
+   *
+   * `__skipAuth` is ALWAYS set on an auth entry path so the JWT guard never
+   * blocks login/register/recover, regardless of which group wins — even a
+   * host-claiming empty-prefix domain group cannot strip it.
+   */
+  private resolveAuthEntry(
+    req: Request & Record<string, any>,
+    url: string,
+    host: string | undefined,
+    groups: Record<string, { prefix?: string; domain?: string; auth?: boolean; skipAuth?: boolean }>,
+  ): void {
+    let authDomain: { name: string; params: Record<string, string> } | null = null;
+    let authPrefix: { name: string; prefixLen: number } | null = null;
+    let authDefault: string | null = null;
+    let plainDefault: string | null = null;
+
+    for (const [name, group] of Object.entries(groups)) {
+      const prefix = group.prefix ?? '';
+      if (prefix.startsWith(':')) continue; // dynamic tenant prefix
+      const authEnabled = group.auth === true && name !== 'public';
+      const compiled = this.compileFor(name, group.domain);
+
+      if (compiled) {
+        if (!authEnabled) continue;
+        const hostResult = matchDomain(compiled, host);
+        if (!hostResult) continue;
+        if (!this.prefixMatches(url, prefix)) continue;
+        if (!authDomain) authDomain = { name, params: hostResult.params };
+        continue;
+      }
+
+      // Plain (non-domain) group.
+      if (!prefix) {
+        // Empty-prefix / default group: the auth-path fallback.
+        if (authEnabled) {
+          if (authDefault == null) authDefault = name;
+        } else if (plainDefault == null) {
+          plainDefault = name;
+        }
+        continue;
+      }
+      if (authEnabled && this.prefixMatches(url, prefix)) {
+        // Prefer the most specific (longest) matching prefix.
+        if (!authPrefix || prefix.length > authPrefix.prefixLen) {
+          authPrefix = { name, prefixLen: prefix.length };
+        }
+      }
+    }
+
+    // Auth entry paths are always exempt from the JWT guard.
+    req.__skipAuth = true;
+
+    if (authDomain) {
+      req.__routeGroup = authDomain.name;
+      this.exposeDomainParams(req, authDomain.params);
+      return;
+    }
+    if (authPrefix) {
+      req.__routeGroup = authPrefix.name;
+      return;
+    }
+    // Fall back to the default group: an auth-enabled empty-prefix group is the
+    // legacy/global auth path itself (design §11.1), so it adopts the auth
+    // route. If none is auth-enabled, use any empty-prefix default group so the
+    // request still carries a first-class group (parity with FIX 3).
+    const fallback = authDefault ?? plainDefault;
+    if (fallback) req.__routeGroup = fallback;
+    // else: no group claims it → legacy/global auth path (null group).
   }
 
   private resolveHost(req: Request & Record<string, any>): string | undefined {

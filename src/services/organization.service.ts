@@ -27,7 +27,14 @@ export class OrganizationService {
     const org = await delegate.findFirst({ where: { [column]: value } });
     if (!org) throw new NotFoundException('Organization not found');
 
-    if (user) {
+    // FIX 11.2: when group-membership enforcement is ON, an authenticated
+    // non-member must receive 403 from GroupMembershipGuard, which takes
+    // precedence over this org-resolution 404. So we DON'T 404 here for a
+    // non-member — we resolve & attach the org and let the downstream guard
+    // decide (allow vs 403). A genuinely non-existent org still 404s above.
+    // When enforcement is OFF (default), behavior is byte-for-byte unchanged:
+    // a non-member still gets the info-hiding 404 here.
+    if (user && !this.config.enforceGroupMembership()) {
       await this.ensureMembership(user, org);
     }
 

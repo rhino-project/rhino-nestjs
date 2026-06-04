@@ -188,6 +188,34 @@ describe('createDomainRouteResolver', () => {
       expect(prisma.userRole.findFirst).not.toHaveBeenCalled();
     });
 
+    // FIX 11.2: when group-membership enforcement is ON, this resolver must NOT
+    // 404 an authenticated non-member — it resolves & attaches the org and lets
+    // the downstream GroupMembershipGuard return 403. A genuinely unknown
+    // subdomain still 404s. Enforcement OFF (default) keeps the 404 above.
+    it('enforceGroupMembership ON: non-member is NOT 404d here (deferred to the 403 guard)', async () => {
+      const prisma = makePrisma([{ id: 1, slug: 'org-one' }], []); // no memberships
+      const cfg = config(groups);
+      (cfg as any).auth = { enforceGroupMembership: true };
+      const mw = createDomainRouteResolver({ prisma, config: cfg });
+      const { req, res, next } = makeCtx('org-one.example.com', '/api/posts', { id: 42 });
+      await mw(req, res, next);
+      expect(next).toHaveBeenCalledWith();
+      expect(req.organization).toEqual({ id: 1, slug: 'org-one' });
+      // membership-404 lookup skipped entirely
+      expect(prisma.userRole.findFirst).not.toHaveBeenCalled();
+    });
+
+    it('enforceGroupMembership ON: a genuinely unknown subdomain still 404s', async () => {
+      const prisma = makePrisma([{ id: 1, slug: 'org-one' }], []);
+      const cfg = config(groups);
+      (cfg as any).auth = { enforceGroupMembership: true };
+      const mw = createDomainRouteResolver({ prisma, config: cfg });
+      const { req, res, next } = makeCtx('nope.example.com', '/api/posts', { id: 42 });
+      await mw(req, res, next);
+      expect(next).not.toHaveBeenCalled();
+      expect(res.statusCode).toBe(404);
+    });
+
     it('enforceMembership: false resolves even for non-members', async () => {
       const prisma = makePrisma([{ id: 1, slug: 'org-one' }], []);
       const mw = createDomainRouteResolver({

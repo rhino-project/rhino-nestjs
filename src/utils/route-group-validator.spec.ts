@@ -130,6 +130,39 @@ describe('validateRouteGroups', () => {
       expect(message).not.toContain("'admin'");
     });
 
+    // FIX 11.1: two+ auth-enabled groups that both have an empty prefix and no
+    // domain are genuinely indistinguishable — they'd register the same legacy
+    // `/auth/*` routes. This must throw EVEN IF their models are disjoint
+    // (the auth-route collision is independent of model overlap).
+    it('two auth-enabled groups with empty prefix and no domain (disjoint models)', () => {
+      expect(() =>
+        validateRouteGroups(
+          cfg({
+            a: { prefix: '', auth: true, models: ['posts'] },
+            b: { prefix: '', auth: true, models: ['categories'] },
+          }),
+        ),
+      ).toThrow(RouteGroupConflictError);
+    });
+
+    it('two auth-enabled groups with omitted prefix and no domain', () => {
+      let message = '';
+      try {
+        validateRouteGroups(
+          cfg({
+            first: { auth: true, models: ['posts'] },
+            second: { auth: true, models: ['categories'] },
+          }),
+        );
+        fail('expected RouteGroupConflictError');
+      } catch (e) {
+        message = (e as Error).message;
+      }
+      expect(message).toContain("'first'");
+      expect(message).toContain("'second'");
+      expect(message).toMatch(/indistinguishable/i);
+    });
+
     it('names the shared prefix and overlapping models', () => {
       let message = '';
       try {
@@ -243,6 +276,47 @@ describe('validateRouteGroups', () => {
 
     it('no route groups configured', () => {
       expect(() => validateRouteGroups(cfg({}))).not.toThrow();
+    });
+
+    // FIX 11.1 regression guards for the auth-indistinguishability rule.
+    it('a single auth-enabled root group is fine (it IS the legacy auth path)', () => {
+      expect(() =>
+        validateRouteGroups(cfg({ default: { prefix: '', auth: true, models: ['posts'] } })),
+      ).not.toThrow();
+    });
+
+    it('two auth-enabled groups distinguished by prefix', () => {
+      expect(() =>
+        validateRouteGroups(
+          cfg({
+            driver: { prefix: 'driver', auth: true, models: ['posts'] },
+            admin: { prefix: 'admin', auth: true, models: ['categories'] },
+          }),
+        ),
+      ).not.toThrow();
+    });
+
+    it('two auth-enabled groups distinguished by domain (one at root)', () => {
+      expect(() =>
+        validateRouteGroups(
+          cfg({
+            tenant: { prefix: '', domain: '{organization}.example.com', auth: true, models: ['posts'] },
+            default: { prefix: '', auth: true, models: ['categories'] },
+          }),
+        ),
+      ).not.toThrow();
+    });
+
+    it('one auth-enabled root group beside a NON-auth root group (disjoint models)', () => {
+      // Only one group is auth-enabled, so there is no auth-route collision.
+      expect(() =>
+        validateRouteGroups(
+          cfg({
+            default: { prefix: '', auth: true, models: ['posts'] },
+            other: { prefix: '', models: ['categories'] },
+          }),
+        ),
+      ).not.toThrow();
     });
   });
 

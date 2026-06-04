@@ -100,10 +100,42 @@ function buildMessage(
  * host that also satisfies another group's `{param}.example.com`) are not
  * statically detected.
  */
+/**
+ * Whether a group registers the legacy/global (empty-prefix, no-domain) auth
+ * route set. Per design §11.1, such an auth-enabled group IS the default auth
+ * path. Two or more of them are genuinely indistinguishable — their auth routes
+ * (and hooks/membership) would collide with no way to tell them apart — so the
+ * validator must reject the config at boot.
+ */
+function isIndistinguishableAuthGroup(group: RouteGroupConfig): boolean {
+  return (
+    group.auth === true &&
+    normalizePrefix(group) === '' &&
+    normalizeDomain(group) === null
+  );
+}
+
 export function validateRouteGroups(config: RhinoConfig): void {
   const groups = config.routeGroups ?? {};
   const models = config.models ?? {};
   const names = Object.keys(groups);
+
+  // FIX 11.1: two+ auth-enabled groups with empty prefix AND no domain are
+  // genuinely indistinguishable — they'd register the same legacy `/auth/*`
+  // routes. The `public` group is never auth-enabled, so it can't collide here.
+  const indistinguishableAuth = names.filter(
+    (n) => n !== 'public' && isIndistinguishableAuthGroup(groups[n]),
+  );
+  if (indistinguishableAuth.length >= 2) {
+    const [a, b] = indistinguishableAuth;
+    throw new RouteGroupConflictError(
+      `Auth-enabled route groups '${a}' and '${b}' are indistinguishable: ` +
+        `both have an empty prefix and no domain, so they would register the ` +
+        `same legacy auth routes and their hooks/membership could not be told ` +
+        `apart. Give one a distinct 'prefix' or a 'domain', or disable 'auth' ` +
+        `on all but one.`,
+    );
+  }
 
   for (let i = 0; i < names.length; i++) {
     for (let j = i + 1; j < names.length; j++) {

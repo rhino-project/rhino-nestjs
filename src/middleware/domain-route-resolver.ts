@@ -63,6 +63,15 @@ export function createDomainRouteResolver(args: {
 }) {
   const { strict = true, enforceMembership = true } = args.options ?? {};
 
+  // FIX 11.2: when group-membership enforcement is ON, an authenticated
+  // non-member must get a 403 from GroupMembershipGuard, which takes precedence
+  // over this resolver's cross-tenant 404. So we resolve & attach the org but
+  // skip the membership-404 here, deferring to the downstream guard. A
+  // genuinely unknown subdomain still 404s (strict). When enforcement is OFF
+  // (default), behavior is byte-for-byte unchanged.
+  const groupMembershipEnforced =
+    args.config.auth?.enforceGroupMembership === true;
+
   const orgModel = args.config.multiTenant?.organizationModel ?? 'organization';
   const userOrgModel = args.config.multiTenant?.userOrganizationModel ?? 'userRole';
   const idColumn = args.config.multiTenant?.organizationIdentifierColumn ?? 'slug';
@@ -135,8 +144,10 @@ export function createDomainRouteResolver(args: {
         return next();
       }
 
-      // Membership check (cross-tenant → 404, not 403).
-      if (enforceMembership && (req as any).user) {
+      // Membership check (cross-tenant → 404, not 403). Skipped when group
+      // membership enforcement is ON — the GroupMembershipGuard returns 403 for
+      // an authenticated non-member, which takes precedence (FIX 11.2).
+      if (enforceMembership && !groupMembershipEnforced && (req as any).user) {
         const userId = (req as any).user.id;
         const urDelegate =
           (args.prisma as any)[camel(userOrgModel)] ?? (args.prisma as any)[userOrgModel];
