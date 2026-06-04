@@ -65,10 +65,27 @@ export class AuthService {
 
   async login(email: string, password: string): Promise<LoginResult> {
     const auth = this.config.authConfig();
-    const user = await this.userDelegate().findFirst({
-      where: { [auth.emailField]: email },
-      include: { userRoles: { include: { organization: true, role: true } } },
-    }).catch(() => null);
+    // Only eager-load the org membership graph when multi-tenancy is configured.
+    // Single-tenant / org-less apps have no `userRoles` relation on their User
+    // model, so an unconditional include would throw inside Prisma and the
+    // `.catch(() => null)` below would surface as "Invalid credentials" — i.e.
+    // an org-less app could never log a valid user in. Gating the include on
+    // `multiTenantEnabled()` keeps multi-tenant behavior byte-for-byte while
+    // letting org-less apps authenticate. (We still degrade gracefully if the
+    // include fails for any other reason: retry the plain lookup.)
+    const wantsOrg = this.config.multiTenantEnabled();
+    let user: any = null;
+    if (wantsOrg) {
+      user = await this.userDelegate().findFirst({
+        where: { [auth.emailField]: email },
+        include: { userRoles: { include: { organization: true, role: true } } },
+      }).catch(() => null);
+    }
+    if (!user) {
+      user = await this.userDelegate().findFirst({
+        where: { [auth.emailField]: email },
+      }).catch(() => null);
+    }
 
     if (!user) throw RhinoException.unauthorized('Invalid credentials');
     const hashed = (user as any)[auth.passwordField];

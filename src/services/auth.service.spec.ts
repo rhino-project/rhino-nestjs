@@ -53,6 +53,57 @@ describe('AuthService', () => {
     await expect(svc.login('x', 'nope')).rejects.toThrow(RhinoException);
   });
 
+  describe('org-less (single-tenant) login', () => {
+    function setupOrgless(userDelegate: any) {
+      const prisma = new PrismaService({ user: userDelegate });
+      // No multiTenant block at all → multiTenantEnabled() is false.
+      const config = new RhinoConfigService(
+        normalizeConfig({ models: {}, auth: { jwtSecret: 'test-secret' } }),
+      );
+      return { svc: new AuthService(prisma, config), config };
+    }
+
+    it('logs in a user whose User model has no userRoles relation (no org include)', async () => {
+      const hashed = await (await setup({ findFirst: jest.fn() })).hashPassword('p');
+      // Plain delegate: succeeds without an `include` and would NOT support one.
+      const findFirst = jest.fn(async (args: any) => {
+        if (args?.include) {
+          // A single-tenant User model has no userRoles relation: Prisma rejects.
+          throw new Error('Unknown field `userRoles` for include statement');
+        }
+        return { id: 7, email: 'solo@example.com', password: hashed };
+      });
+      const { svc } = setupOrgless({ findFirst });
+      const res = await svc.login('solo@example.com', 'p');
+      expect(res.token).toBeTruthy();
+      expect(res.organizationSlug).toBeUndefined();
+      // When multi-tenancy is off we never even attempt the org include.
+      expect(findFirst).toHaveBeenCalledTimes(1);
+      expect(findFirst.mock.calls[0][0]).not.toHaveProperty('include');
+    });
+
+    it('falls back to a plain lookup when the org include throws under multi-tenancy', async () => {
+      const hashed = await (await setup({ findFirst: jest.fn() })).hashPassword('p');
+      const findFirst = jest.fn(async (args: any) => {
+        if (args?.include) throw new Error('relation missing');
+        return { id: 8, email: 'fallback@example.com', password: hashed };
+      });
+      const prisma = new PrismaService({ user: { findFirst } });
+      const config = new RhinoConfigService(
+        normalizeConfig({
+          models: {},
+          auth: { jwtSecret: 'test-secret' },
+          multiTenant: { enabled: true, organizationModel: 'organization' },
+        }),
+      );
+      const svc = new AuthService(prisma, config);
+      const res = await svc.login('fallback@example.com', 'p');
+      expect(res.token).toBeTruthy();
+      // First attempt (with include) failed, second (plain) succeeded.
+      expect(findFirst).toHaveBeenCalledTimes(2);
+    });
+  });
+
   describe('token revocation', () => {
     it('revokeToken records the token in the denylist when available', async () => {
       const created: any[] = [];
