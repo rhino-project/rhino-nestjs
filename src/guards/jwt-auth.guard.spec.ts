@@ -6,6 +6,22 @@ import { RhinoException } from '../errors/rhino-exception';
 
 function makeGuard(userDelegate: any, jwtSecret = 'test-secret') {
   const prisma = new PrismaService({ user: userDelegate });
+  // Multi-tenant on by default here so the userRoles include path is exercised
+  // (matches the historical behavior these tests assert).
+  const config = new RhinoConfigService(
+    normalizeConfig({
+      models: {},
+      auth: { jwtSecret },
+      multiTenant: { enabled: true, organizationModel: 'organization' },
+    }),
+  );
+  const auth = new AuthService(prisma, config);
+  return { guard: new JwtAuthGuard(auth, prisma, config), auth, prisma };
+}
+
+function makeOrglessGuard(userDelegate: any, jwtSecret = 'test-secret') {
+  const prisma = new PrismaService({ user: userDelegate });
+  // No multiTenant → org-less app: the guard must NOT attempt a userRoles include.
   const config = new RhinoConfigService(normalizeConfig({ models: {}, auth: { jwtSecret } }));
   const auth = new AuthService(prisma, config);
   return { guard: new JwtAuthGuard(auth, prisma, config), auth, prisma };
@@ -85,6 +101,39 @@ describe('JwtAuthGuard', () => {
       where: { id: 7 },
       include: { userRoles: { include: { role: true } } },
     });
+  });
+
+  it('loads the user WITHOUT a userRoles include for an org-less app', async () => {
+    const user = { id: 5, email: 'solo@x.io' };
+    const findUnique = jest.fn(async (args: any) => {
+      // A single-tenant User model has no userRoles relation: reject the include.
+      if (args?.include) throw new Error('Unknown field `userRoles`');
+      return user;
+    });
+    const { guard, auth } = makeOrglessGuard({ findUnique });
+    const token = auth.signToken({ sub: 5 });
+    const req: any = { headers: { authorization: `Bearer ${token}` } };
+    const ok = await guard.canActivate(makeCtx(req));
+    expect(ok).toBe(true);
+    expect(req.user).toBe(user);
+    // Org-less: only the plain lookup is attempted (no include path).
+    expect(findUnique).toHaveBeenCalledTimes(1);
+    expect(findUnique.mock.calls[0][0]).not.toHaveProperty('include');
+  });
+
+  it('falls back to a plain lookup when the userRoles include throws (multi-tenant)', async () => {
+    const user = { id: 6 };
+    const findUnique = jest.fn(async (args: any) => {
+      if (args?.include) throw new Error('relation missing');
+      return user;
+    });
+    const { guard, auth } = makeGuard({ findUnique });
+    const token = auth.signToken({ sub: 6 });
+    const req: any = { headers: { authorization: `Bearer ${token}` } };
+    const ok = await guard.canActivate(makeCtx(req));
+    expect(ok).toBe(true);
+    expect(req.user).toBe(user);
+    expect(findUnique).toHaveBeenCalledTimes(2);
   });
 
   it('coerces a non-string authorization header to string before splitting', async () => {

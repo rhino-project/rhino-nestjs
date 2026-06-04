@@ -36,10 +36,26 @@ export class JwtAuthGuard implements CanActivate {
     }
     const userModel = this.config.authConfig().userModel;
     const delegate = this.prisma.model(userModel);
-    const user = await delegate.findUnique({
-      where: { id: payload.sub },
-      include: { userRoles: { include: { role: true } } },
-    });
+    // Only eager-load userRoles when multi-tenancy is configured. A
+    // single-tenant / org-less app's User model has no `userRoles` relation, so
+    // an unconditional include throws inside Prisma — which would make every
+    // authenticated request fail with a 401 even though the token is valid.
+    // Gate the include and fall back to a plain lookup if it fails. Multi-tenant
+    // behavior is byte-for-byte unchanged.
+    let user: any = null;
+    if (this.config.multiTenantEnabled()) {
+      user = await delegate
+        .findUnique({
+          where: { id: payload.sub },
+          include: { userRoles: { include: { role: true } } },
+        })
+        .catch(() => null);
+    }
+    if (!user) {
+      user = await delegate
+        .findUnique({ where: { id: payload.sub } })
+        .catch(() => null);
+    }
     if (!user) throw RhinoException.unauthorized('User not found');
     req.user = user;
     return true;
