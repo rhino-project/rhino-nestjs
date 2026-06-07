@@ -124,6 +124,15 @@ This library provides the following features. When modifying or extending any of
 - **Default group is a first-class membership dimension.** `RouteGroupMiddleware`
   resolves `__routeGroup` to the empty-prefix/default group's name (not
   `undefined`), so membership enforcement applies uniformly to it.
+- **Membership is enforced at `/auth/login`, not only at the resource layer.**
+  When enforcement is ON, `AuthController.login` runs the coarse membership gate
+  (`AuthController.assertGroupMembership`) right after authenticating and BEFORE
+  the `afterLogin` hook: a non-member is rejected with **403**
+  (`MEMBERSHIP_DENIED`) and the just-issued token is revoked (best-effort) and
+  never returned — matching the Laravel/Rails AuthControllers. The check keys off
+  the resolved `__routeGroup`/`organization` and skips only the `public` group.
+  It deliberately does NOT bail on `req.__skipAuth` (consumers set that on auth
+  entrypoints to bypass the JWT guard — it is not a "skip membership" signal).
 
 ## Running Tests
 

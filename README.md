@@ -182,7 +182,7 @@ That's it. You now have a full REST API for posts:
 | 26 | **Generator CLI** | `rhino install`, `rhino generate`, `rhino blueprint`. |
 | 27 | **Postman Export** | Auto-generated Postman Collection v2.1 with all endpoints. |
 | 28 | **Blueprint System** | YAML-to-code generation for models, migrations, policies, tests, and seeders. |
-| 29 | **Group Membership** | Opt-in `auth.enforceGroupMembership` makes a route group an access boundary. Memberships are keyed by `(user, route_group, organization, role)` on `user_roles`; a NULL `route_group` is a wildcard. No match → 403. Permissions then resolve from the matched membership row. |
+| 29 | **Group Membership** | Opt-in `auth.enforceGroupMembership` makes a route group an access boundary. Memberships are keyed by `(user, route_group, organization, role)` on `user_roles`; a NULL `route_group` is a wildcard. No match → 403, enforced both at `/auth/login` (non-members can't sign in) and on every resource request. Permissions then resolve from the matched membership row. |
 | 30 | **Group-Aware Auth & Lifecycle Hooks** | Per-group `auth: true` registers the auth route set under the group; per-group `hooks` (a provider implementing `AuthLifecycleHooks`) run `afterLogin/afterLogout/afterRegister/afterPasswordRecover/afterPasswordReset` and may reject (revoking the issued token). Invitations carry the `route_group`; accept populates the membership. See [Group-auth hooks & token revocation](#group-auth-hooks--token-revocation). |
 
 ### Group-auth hooks & token revocation

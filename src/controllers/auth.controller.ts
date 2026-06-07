@@ -10,6 +10,8 @@ import { InvitationService } from '../services/invitation.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { RhinoConfigService } from '../rhino.config';
 import { AuthHooksService, type AuthHookEvent } from '../services/auth-hooks.service';
+import { MembershipService } from '../services/membership.service';
+import { RhinoException } from '../errors/rhino-exception';
 import type { AuthHookContext } from '../interfaces/rhino-config.interface';
 
 export interface LoginDto {
@@ -40,6 +42,9 @@ export class AuthController {
     private readonly config: RhinoConfigService,
     // Optional so lightweight unit harnesses can omit it (no-op hooks then).
     private readonly hooks?: AuthHooksService,
+    // Optional for the same reason: when absent, membership enforcement is a
+    // no-op (equivalent to `auth.enforceGroupMembership` being off).
+    private readonly membership?: MembershipService,
   ) {}
 
   /** Group resolved for this auth request (set by RouteGroupMiddleware). */
@@ -62,6 +67,38 @@ export class AuthController {
     await this.hooks.run(event, this.routeGroup(req), ctx);
   }
 
+  /**
+   * Enforce group membership at the auth boundary — parity with the
+   * GroupMembershipGuard (resource layer) and the Laravel/Rails AuthControllers.
+   *
+   * When `auth.enforceGroupMembership` is ON, a non-member must be rejected at
+   * `/auth/login` with **403** rather than being allowed to authenticate and
+   * only blocked later on the first resource request. The just-issued token is
+   * revoked (best-effort) and never returned. This is the COARSE gate, so it
+   * runs BEFORE the `afterLogin` hook.
+   *
+   * No-op when: enforcement is off (or the MembershipService isn't wired), the
+   * request skips auth, or the resolved group is `public`.
+   */
+  private async assertGroupMembership(
+    req: any,
+    user: any,
+    token: string,
+  ): Promise<void> {
+    if (!this.membership?.enabled()) return;
+    // NOTE: we deliberately do NOT bail on `req.__skipAuth` here. Consumers set
+    // that flag on auth entrypoints (login/register) to bypass the JWT guard
+    // (there's no token yet) — it does NOT mean "skip membership". The genuine
+    // skip signal is the `public` group, handled below (matches the guard).
+    const routeGroup = this.routeGroup(req);
+    if (routeGroup === 'public') return;
+    const org = req?.organization ?? null;
+    const isTenant = this.config.isTenantGroup(routeGroup);
+    if (this.membership.isMember(user, routeGroup, org, isTenant)) return;
+    await this.authService.revokeToken(token);
+    throw RhinoException.membershipDenied();
+  }
+
   @Post('login')
   async login(@Body() dto: LoginDto, @Req() req?: any) {
     if (!dto?.email || !dto?.password) {
@@ -71,6 +108,9 @@ export class AuthController {
       dto.email,
       dto.password,
     );
+    // Coarse membership gate (before the hook): a non-member is rejected here
+    // with 403, matching the resource-layer guard and the Laravel/Rails stacks.
+    await this.assertGroupMembership(req, user, token);
     const routeGroup = this.routeGroup(req);
     try {
       await this.runHook('afterLogin', req, {
