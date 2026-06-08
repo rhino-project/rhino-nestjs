@@ -1,6 +1,6 @@
 {
   "name": "@rhino-dev/rhino-nestjs",
-  "version": "4.2.1",
+  "version": "4.3.0",
   "description": "Rhino for NestJS — auto-generated REST APIs from model definitions.",
   "author": "Bruno Cipolla <bruno@codalio.com>",
   "license": "MIT",
