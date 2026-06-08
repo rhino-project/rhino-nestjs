@@ -15,6 +15,7 @@ import { runGenerate } from './commands/generate.command';
 import { runBlueprint } from './commands/blueprint.command';
 import { runExportPostman } from './commands/export-postman.command';
 import { runExportTypes } from './commands/export-types.command';
+import { runPermissionsMigrate } from './commands/permissions-migrate.command';
 
 // -----------------------------------------------------------------------
 // Flag parsing helpers
@@ -55,6 +56,7 @@ export function printHelp(): void {
     blueprint        Generate code from YAML blueprints
     export-postman   Export a Postman collection
     export-types     Export TypeScript type definitions
+    permissions-migrate  Lift per-user permissions into the org role layer (--apply)
 
   Options (by command):
     blueprint
@@ -110,6 +112,10 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
         output:
           typeof flags['output'] === 'string' ? flags['output'] : undefined,
       });
+      break;
+
+    case 'permissions-migrate':
+      await runPermissionsMigrate(flags);
       break;
 
     default:

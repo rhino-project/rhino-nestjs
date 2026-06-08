@@ -57,6 +57,69 @@ export function matchesPermission(
   return false;
 }
 
+// ──────────────────────────────────────────────────────────────────────────
+// Layered permissions (PERMISSIONS_DESIGN.md)
+//
+//   effective = (role ∪ granted) − denied        (deny always wins)
+//
+//   - role    → org_role_permissions[(org, role)].permissions  (shared role layer)
+//   - granted → user_roles.granted_permissions                 (per-user additive)
+//   - denied  → user_roles.denied_permissions                  (per-user subtractive)
+//   - legacy  → user_roles.permissions                         (back-compat allow)
+//
+// The matcher reads these from the in-memory user object. `grantedPermissions`
+// / `deniedPermissions` are scalar columns on user_roles (loaded automatically).
+// The role layer is read from the row's `role.orgRolePermissions` (Prisma deep
+// include), filtered to the row's own organization — or from a pre-resolved
+// `rolePermissions` list if a service attached one.
+// ──────────────────────────────────────────────────────────────────────────
+
+function readOrgId(ur: any): number | string | null | undefined {
+  return ur?.organizationId ?? ur?.organization_id;
+}
+
+/** The shared role-layer permissions for a single user_role row. */
+export function rowRolePermissions(ur: any): string[] {
+  if (!ur) return [];
+  // Pre-resolved by a service (e.g. raw-SQL consumers).
+  const direct = ur.rolePermissions ?? ur.role_permissions;
+  if (direct != null) return coercePermissions(direct);
+
+  // From the role's org_role_permissions, scoped to this row's organization.
+  const orgId = readOrgId(ur);
+  const layers =
+    ur.role?.orgRolePermissions ??
+    ur.role?.org_role_permissions ??
+    ur.orgRolePermissions ??
+    ur.org_role_permissions;
+  if (!Array.isArray(layers)) return [];
+
+  const acc: string[] = [];
+  for (const entry of layers) {
+    const entryOrg = entry?.organizationId ?? entry?.organization_id;
+    if (orgId == null || entryOrg === orgId) {
+      for (const p of coercePermissions(entry?.permissions)) acc.push(p);
+    }
+  }
+  return acc;
+}
+
+/** The allow set contributed by a single user_role row (legacy ∪ granted ∪ role). */
+export function rowAllowPermissions(ur: any): string[] {
+  if (!ur) return [];
+  return [
+    ...coercePermissions(ur.permissions),
+    ...coercePermissions(ur.grantedPermissions ?? ur.granted_permissions),
+    ...rowRolePermissions(ur),
+  ];
+}
+
+/** The deny set contributed by a single user_role row. */
+export function rowDeniedPermissions(ur: any): string[] {
+  if (!ur) return [];
+  return coercePermissions(ur.deniedPermissions ?? ur.denied_permissions);
+}
+
 /**
  * Resolve the role slug for a user in a specific organization.
  * Expects a user object shaped like the Laravel user with userRoles relation.
@@ -74,18 +137,18 @@ export function resolveUserRoleSlug(user: any, organizationId: number | string |
 }
 
 /**
- * Resolve permissions granted to a user in an organization context.
- * Tenant context → aggregates permissions from all user_roles entries
- *                  matching the organization.
- * No org context → returns the user's top-level permissions array.
+ * Resolve the ALLOW permissions granted to a user in an organization context.
+ * Tenant context → unions every user_roles entry's (legacy ∪ granted ∪ role
+ *                  layer) for the org.
+ * No org context → the user's top-level permissions ∪ grantedPermissions.
  */
 export function resolveUserPermissions(user: any, organizationId?: number | string | null): string[] {
   if (!user) return [];
   // Group-membership enforcement (design §6): when the membership layer has
   // resolved the matching row(s), the permission source switches to that row
-  // only. The guard attaches the resolved list as `__membershipPermissions`.
-  // Absent (enforcement off) → fall through to the legacy heuristic, so
-  // existing behavior is byte-for-byte unchanged.
+  // only. The guard attaches the resolved ALLOW list as `__membershipPermissions`.
+  // Absent (enforcement off) → fall through to the legacy heuristic, so existing
+  // behavior is byte-for-byte unchanged.
   if (Array.isArray(user.__membershipPermissions)) {
     return coercePermissions(user.__membershipPermissions);
   }
@@ -93,20 +156,43 @@ export function resolveUserPermissions(user: any, organizationId?: number | stri
     const userRoles = user.userRoles ?? user.user_roles ?? [];
     const all: string[] = [];
     for (const ur of userRoles) {
-      const orgId = ur.organizationId ?? ur.organization_id;
-      if (orgId === organizationId) {
-        // BP-008: coerce into an array first — value may arrive as a raw
-        // JSON string from SQLite/MySQL or similar DBs without native arrays.
-        for (const p of coercePermissions(ur.permissions)) all.push(p);
+      if (readOrgId(ur) === organizationId) {
+        for (const p of rowAllowPermissions(ur)) all.push(p);
       }
     }
     return all;
   }
-  return coercePermissions(user.permissions);
+  return [
+    ...coercePermissions(user.permissions),
+    ...coercePermissions(user.grantedPermissions ?? user.granted_permissions),
+  ];
+}
+
+/**
+ * Resolve the DENY permissions for a user in an organization context. Deny
+ * always wins over the allow set.
+ */
+export function resolveDeniedPermissions(user: any, organizationId?: number | string | null): string[] {
+  if (!user) return [];
+  if (Array.isArray(user.__membershipDeniedPermissions)) {
+    return coercePermissions(user.__membershipDeniedPermissions);
+  }
+  if (organizationId != null) {
+    const userRoles = user.userRoles ?? user.user_roles ?? [];
+    const all: string[] = [];
+    for (const ur of userRoles) {
+      if (readOrgId(ur) === organizationId) {
+        for (const p of rowDeniedPermissions(ur)) all.push(p);
+      }
+    }
+    return all;
+  }
+  return coercePermissions(user.deniedPermissions ?? user.denied_permissions);
 }
 
 /**
  * Top-level permission check mirroring the Laravel `hasPermission` method.
+ * Applies deny-overrides: a denied permission is denied even under a role `*`.
  */
 export function userHasPermission(
   user: any,
@@ -115,6 +201,9 @@ export function userHasPermission(
 ): boolean {
   if (!user) return false;
   const orgId = organization ? organization.id : null;
-  const permissions = resolveUserPermissions(user, orgId);
-  return matchesPermission(permission, permissions);
+
+  // Deny always wins.
+  if (matchesPermission(permission, resolveDeniedPermissions(user, orgId))) return false;
+
+  return matchesPermission(permission, resolveUserPermissions(user, orgId));
 }

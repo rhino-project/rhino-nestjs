@@ -97,9 +97,10 @@ describe('JwtAuthGuard', () => {
     const token = auth.signToken({ sub: 7 });
     const req: any = { headers: { authorization: `Bearer ${token}` } };
     await guard.canActivate(makeCtx(req));
+    // Preferred include eager-loads the org role layer (org_role_permissions).
     expect(findUnique).toHaveBeenCalledWith({
       where: { id: 7 },
-      include: { userRoles: { include: { role: true } } },
+      include: { userRoles: { include: { role: { include: { orgRolePermissions: true } } } } },
     });
   });
 
@@ -133,6 +134,25 @@ describe('JwtAuthGuard', () => {
     const ok = await guard.canActivate(makeCtx(req));
     expect(ok).toBe(true);
     expect(req.user).toBe(user);
+    // Three tiers: deep include (role layer) → role-only include → plain lookup.
+    expect(findUnique).toHaveBeenCalledTimes(3);
+  });
+
+  it('falls back to the role-only include when only the role-layer include throws', async () => {
+    const user = { id: 8, userRoles: [] };
+    const findUnique = jest.fn(async (args: any) => {
+      // The deep org-role-layer include is unknown; the role-only include works.
+      const include = args?.include?.userRoles?.include;
+      if (include?.role?.include?.orgRolePermissions) throw new Error('relation missing');
+      return user;
+    });
+    const { guard, auth } = makeGuard({ findUnique });
+    const token = auth.signToken({ sub: 8 });
+    const req: any = { headers: { authorization: `Bearer ${token}` } };
+    const ok = await guard.canActivate(makeCtx(req));
+    expect(ok).toBe(true);
+    expect(req.user).toBe(user);
+    // Deep include throws, role-only include succeeds → no plain fallback.
     expect(findUnique).toHaveBeenCalledTimes(2);
   });
 

@@ -44,12 +44,27 @@ export class JwtAuthGuard implements CanActivate {
     // behavior is byte-for-byte unchanged.
     let user: any = null;
     if (this.config.multiTenantEnabled()) {
+      // Preferred: also eager-load the org role layer (org_role_permissions) so
+      // layered permission resolution has the role-level grants. Apps that have
+      // not added the OrgRolePermission relation will throw on this include —
+      // fall back to the role-only include (grant/deny columns are scalars and
+      // still load there), then to a plain lookup. Existing behavior is unchanged.
       user = await delegate
         .findUnique({
           where: { id: payload.sub },
-          include: { userRoles: { include: { role: true } } },
+          include: {
+            userRoles: { include: { role: { include: { orgRolePermissions: true } } } },
+          },
         })
         .catch(() => null);
+      if (!user) {
+        user = await delegate
+          .findUnique({
+            where: { id: payload.sub },
+            include: { userRoles: { include: { role: true } } },
+          })
+          .catch(() => null);
+      }
     }
     if (!user) {
       user = await delegate

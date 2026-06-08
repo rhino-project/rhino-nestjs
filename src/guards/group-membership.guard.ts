@@ -51,8 +51,11 @@ export class GroupMembershipGuard implements CanActivate {
       throw RhinoException.membershipDenied();
     }
 
-    // Switch the permission source to the matched membership row(s).
+    // Switch the permission source to the matched membership row(s). Both the
+    // allow set (legacy ∪ granted ∪ role layer) and the deny set come from the
+    // matched rows only; deny wins downstream in `userHasPermission`.
     (user as any).__membershipPermissions = this.membership.permissionsFromRows(rows);
+    (user as any).__membershipDeniedPermissions = this.membership.deniedFromRows(rows);
     return true;
   }
 }

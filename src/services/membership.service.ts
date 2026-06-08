@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { RhinoConfigService } from '../rhino.config';
-import { coercePermissions } from '../utils/permission-matcher';
+import { rowAllowPermissions, rowDeniedPermissions } from '../utils/permission-matcher';
 
 /**
  * A single `user_roles` membership row, normalized across snake_case /
@@ -11,6 +11,8 @@ export interface MembershipRow {
   routeGroup: string | null;
   organizationId: number | string | null;
   permissions: unknown;
+  grantedPermissions?: unknown;
+  deniedPermissions?: unknown;
   role?: any;
 }
 
@@ -86,6 +88,8 @@ export class MembershipService {
         routeGroup: rowGroup,
         organizationId: rowOrg,
         permissions: ur.permissions,
+        grantedPermissions: ur.grantedPermissions ?? ur.granted_permissions,
+        deniedPermissions: ur.deniedPermissions ?? ur.denied_permissions,
         role: ur.role,
       });
     }
@@ -106,13 +110,26 @@ export class MembershipService {
   }
 
   /**
-   * Permissions granted to the user from the matched membership rows only
+   * ALLOW permissions resolved from the matched membership rows only
    * (design §6: "permissions then resolve from that matching membership row").
+   * Layered: each row contributes legacy ∪ granted ∪ org role layer.
    */
   permissionsFromRows(rows: MembershipRow[]): string[] {
     const out: string[] = [];
     for (const r of rows) {
-      for (const p of coercePermissions(r.permissions)) out.push(p);
+      for (const p of rowAllowPermissions(r)) out.push(p);
+    }
+    return out;
+  }
+
+  /**
+   * DENY permissions resolved from the matched membership rows. Deny always
+   * wins over the allow set ({@link permissionsFromRows}).
+   */
+  deniedFromRows(rows: MembershipRow[]): string[] {
+    const out: string[] = [];
+    for (const r of rows) {
+      for (const p of rowDeniedPermissions(r)) out.push(p);
     }
     return out;
   }
