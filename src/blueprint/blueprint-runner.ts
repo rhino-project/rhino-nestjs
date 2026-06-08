@@ -3,6 +3,7 @@ import * as path from 'path';
 
 import { BlueprintParser } from './blueprint-parser';
 import { BlueprintValidator } from './blueprint-validator';
+import { BlueprintSorter } from './blueprint-sorter';
 import { ManifestManager } from './manifest-manager';
 import { PrismaSchemaGenerator } from './generators/prisma-schema-generator';
 import { ResourceDefinitionGenerator } from './generators/resource-definition-generator';
@@ -92,7 +93,40 @@ export class BlueprintRunner {
 
     const manifest = new ManifestManager(manifestDir);
 
-    for (const filename of yamlFiles) {
+    // Order so a referenced model is processed before any model that
+    // foreign-keys to it (parents before children) — keeps order-sensitive
+    // output (e.g. seeders) runnable and matches the Laravel/Rails stacks, where
+    // migration timestamps follow this order.
+    const sorter = new BlueprintSorter();
+    const parsedForOrder: Array<{ file: string; blueprint: any }> = [];
+    const unparseable: string[] = [];
+    for (const f of yamlFiles) {
+      try {
+        parsedForOrder.push({ file: f, blueprint: this.parser.parseModel(path.join(blueprintsDir, f)) });
+      } catch {
+        unparseable.push(f);
+      }
+    }
+    const orderedBlueprints = sorter.sort(parsedForOrder.map((p) => p.blueprint));
+    const fileByModel = new Map<string, string>();
+    for (const p of parsedForOrder) {
+      if (!fileByModel.has(p.blueprint.model)) {
+        fileByModel.set(p.blueprint.model, p.file);
+      }
+    }
+    const orderedYamlFiles = [
+      ...orderedBlueprints.map((bp) => fileByModel.get(bp.model)!).filter(Boolean),
+      ...unparseable,
+    ];
+    if (sorter.cycles.length > 0) {
+      this.log(
+        `  ⚠ Circular foreign-key dependency among: ${sorter.cycles.join(', ')}. ` +
+          'Order is best-effort — make one side nullable or add the FK in a later step.',
+        options,
+      );
+    }
+
+    for (const filename of orderedYamlFiles) {
       const filePath = path.join(blueprintsDir, filename);
 
       try {
