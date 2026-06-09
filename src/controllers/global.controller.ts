@@ -20,6 +20,7 @@ import { ResponseInterceptor, paginated } from '../interceptors/response.interce
 import { ResourcePolicy } from '../policies/resource-policy';
 import { RhinoException } from '../errors/rhino-exception';
 import type { RhinoRequest } from '../interfaces/rhino-request.interface';
+import type { ModelRegistration } from '../interfaces/rhino-config.interface';
 
 type ReqWithCtx = RhinoRequest;
 
@@ -51,25 +52,71 @@ export class GlobalController {
   }
 
   /**
-   * Enforce include-level authorization: every `?include=relation` must be
-   * a resource the user can `viewAny`. This mirrors Laravel's Gate::authorize
-   * check run inside GlobalController when resolving includes.
+   * Enforce include-level authorization: every `?include=relation` must resolve
+   * to a REGISTERED resource the user can `viewAny`. This mirrors Laravel/Rails,
+   * which authorize an include against the RELATED MODEL (not the relation name).
+   *
+   * An include that does not resolve to a registered resource is HARD-DENIED —
+   * the lib never silently exposes a relation it cannot authorize (e.g. a
+   * `belongsTo(User)` named `assignee` when `users` isn't registered).
    */
-  private assertIncludesAuthorized(rawInclude: any, req: any) {
+  private assertIncludesAuthorized(rawInclude: any, req: any, parentSlug?: string) {
     if (!rawInclude) return;
     const paths = String(rawInclude).split(',').map((s) => s.trim()).filter(Boolean);
-    const slugs = new Set<string>();
-    for (const p of paths) slugs.add(p.split('.')[0]);
-    for (const slug of slugs) {
-      const reg = this.config.model(slug);
-      if (!reg) continue;
+    const parentReg = parentSlug ? this.config.model(parentSlug) : undefined;
+
+    const seen = new Set<string>();
+    for (const p of paths) {
+      const relation = p.split('.')[0];
+      if (seen.has(relation)) continue;
+      seen.add(relation);
+
+      const targetSlug = this.resolveIncludeTargetSlug(relation, parentReg);
+      if (!targetSlug) {
+        throw RhinoException.includeNotAuthorized(relation);
+      }
+
+      const reg = this.config.model(targetSlug)!;
       const PolicyClass = reg.policy ?? ResourcePolicy;
       const policy = new PolicyClass();
-      policy.resourceSlug = slug;
+      policy.resourceSlug = targetSlug;
       if (!policy.viewAny(req.user, req.organization)) {
-        throw RhinoException.includeNotAuthorized(slug);
+        throw RhinoException.includeNotAuthorized(relation);
       }
     }
+  }
+
+  /**
+   * Resolve an include relation name to the slug of a REGISTERED model, matching
+   * the Laravel/Rails behavior of gating on the related model:
+   *   1. the include name is itself a registered slug, or
+   *   2. a belongsTo relation whose FK is declared in the parent's fkConstraints
+   *      ({ field, model }) — relation `assignee` maps to FK `assigneeId` /
+   *      `assignee_id` → fk.model → the slug registered for that model.
+   * Returns null when the relation does not resolve to a registered resource.
+   */
+  private resolveIncludeTargetSlug(relation: string, parentReg?: ModelRegistration): string | null {
+    if (this.config.model(relation)) return relation;
+
+    const fk = (parentReg?.fkConstraints ?? []).find(
+      (c) => c.field === `${relation}Id` || c.field === `${relation}_id` || c.field === relation,
+    );
+    if (fk) {
+      const slug = this.slugForModelName(fk.model);
+      if (slug) return slug;
+    }
+    return null;
+  }
+
+  /** Reverse lookup: the registered slug whose model name (or slug) matches. */
+  private slugForModelName(modelName: string): string | null {
+    const target = String(modelName).toLowerCase();
+    for (const [slug, reg] of Object.entries(this.config.models())) {
+      if (slug.toLowerCase() === target || String(reg.model).toLowerCase() === target) {
+        return slug;
+      }
+    }
+    return null;
   }
 
   @Get(':modelSlug/trashed')
@@ -99,7 +146,7 @@ export class GlobalController {
     @Req() req: ReqWithCtx,
   ) {
     const reg = this.assertActionAllowed(modelSlug, 'index');
-    this.assertIncludesAuthorized(query?.include, req);
+    this.assertIncludesAuthorized(query?.include, req, modelSlug);
     const result = await this.resources.findAll(modelSlug, query, {
       user: req.user,
       organization: req.organization,
@@ -119,7 +166,7 @@ export class GlobalController {
     @Req() req: ReqWithCtx,
   ) {
     const reg = this.assertActionAllowed(modelSlug, 'show');
-    this.assertIncludesAuthorized(query?.include, req);
+    this.assertIncludesAuthorized(query?.include, req, modelSlug);
     const record = await this.resources.findOne(modelSlug, id, query, {
       user: req.user,
       organization: req.organization,
