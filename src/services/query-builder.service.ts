@@ -1,5 +1,6 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import type { ModelRegistration } from '../interfaces/rhino-config.interface';
+import { RhinoException } from '../errors/rhino-exception';
 
 export interface ParsedQuery {
   where: Record<string, any>;
@@ -8,6 +9,8 @@ export interface ParsedQuery {
   select?: Record<string, any>;
   page?: number;
   perPage?: number;
+  /** Validated named-scope key to apply (index/trashed only). */
+  scopeName?: string;
 }
 
 /**
@@ -23,8 +26,12 @@ export interface ParsedQuery {
  */
 @Injectable()
 export class QueryBuilderService {
-  build(query: Record<string, any>, reg: ModelRegistration): ParsedQuery {
-    return {
+  build(
+    query: Record<string, any>,
+    reg: ModelRegistration,
+    opts: { namedScopes?: boolean } = {},
+  ): ParsedQuery {
+    const parsed: ParsedQuery = {
       where: this.buildWhere(query, reg),
       orderBy: this.buildOrderBy(query, reg),
       include: this.buildInclude(query, reg),
@@ -32,6 +39,29 @@ export class QueryBuilderService {
       page: this.parseInt(query.page),
       perPage: this.parseInt(query.per_page ?? query.perPage),
     };
+
+    if (opts.namedScopes) {
+      // A non-string (e.g. repeated/array ?scope=a&scope=b) is never a valid
+      // scope name — reject it before any prototype-key lookups.
+      if (query.scope != null && typeof query.scope !== 'string') {
+        throw RhinoException.forbidden(`Scope is not allowed`);
+      }
+      const requested =
+        typeof query.scope === 'string' && query.scope !== '' ? query.scope : undefined;
+      const scopeName = requested ?? reg.defaultScope;
+      if (scopeName !== undefined) {
+        if (
+          !reg.namedScopes ||
+          !Object.prototype.hasOwnProperty.call(reg.namedScopes, scopeName) ||
+          typeof reg.namedScopes[scopeName] !== 'function'
+        ) {
+          throw RhinoException.forbidden(`Scope '${scopeName}' is not allowed`);
+        }
+        parsed.scopeName = scopeName;
+      }
+    }
+
+    return parsed;
   }
 
   buildWhere(query: Record<string, any>, reg: ModelRegistration): Record<string, any> {

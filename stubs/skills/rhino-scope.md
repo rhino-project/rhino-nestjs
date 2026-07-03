@@ -138,3 +138,46 @@ npm test
 - Returning `{}` from `apply()` adds no filter — safe default for "no restriction needed".
 - Scopes are AND-merged with the org filter and user-supplied filters. Do not add an `AND: [...]` wrapper yourself.
 - Do not use `req.user` or `request()` inside a scope class — the user context is passed as a parameter.
+
+## Named Scopes (`?scope=<key>`) — client-selectable, opt-in
+
+The `scopes` array above is a *global* scope: it applies to every query, always.
+A **named scope** is different — it is client-selectable via `?scope=<key>` and
+applies only to `index`/`trashed` (not `show`/`update`/`destroy`). Implement
+`RhinoNamedScope` (from the package root) — its `apply(ctx)` takes **only** the
+context and returns a Prisma where-*fragment*; Rhino AND-wraps it into the query,
+so a named scope can never drop the org/filter/search/soft-delete constraints
+(do NOT add your own `AND: [...]` wrapper here).
+
+```typescript
+import type { RhinoNamedScope, ScopeContext } from '@rhino-dev/rhino-nestjs';
+
+export class AvailableForDriversScope implements RhinoNamedScope {
+  apply(ctx: ScopeContext): Record<string, any> {
+    if (!ctx.user) return { id: { in: [] } };   // fail closed with no user
+    return { status: 'active', ownerId: ctx.user.id };
+  }
+}
+
+export class ActiveScope implements RhinoNamedScope {
+  apply(): Record<string, any> {
+    return { status: 'active' };
+  }
+}
+```
+
+Register the callable keys on the model. Only declared keys are callable; an
+unknown or prototype key (`?scope=constructor`) is rejected with **403**. A
+non-string `?scope` (repeated/array param) is also **403**. `defaultScope` is
+applied when no `?scope` is sent and is validated at boot to be a declared key.
+
+```typescript
+routes: {
+  model: 'route',
+  namedScopes: {
+    active: ActiveScope,
+    availableForDrivers: AvailableForDriversScope,
+  },
+  defaultScope: 'active',   // must be a key of namedScopes
+}
+```

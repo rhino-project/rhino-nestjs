@@ -4,6 +4,7 @@ import { RhinoConfigService } from '../rhino.config';
 import { QueryBuilderService, ParsedQuery } from './query-builder.service';
 import { ScopeService } from './scope.service';
 import { resolveUserRoleSlug } from '../utils/permission-matcher';
+import { RhinoException } from '../errors/rhino-exception';
 
 export interface FindAllResult {
   items: any[];
@@ -63,9 +64,22 @@ export class ResourceService {
     const reg = this.config.model(modelSlug);
     if (!reg) throw new Error(`Unknown model: ${modelSlug}`);
     const delegate = this.delegate(modelSlug);
-    const parsed: ParsedQuery = this.queryBuilder.build(rawQuery, reg);
+    const parsed: ParsedQuery = this.queryBuilder.build(rawQuery, reg, { namedScopes: true });
     let where = this.mergeWhere(parsed.where, this.orgFilter(modelSlug, ctx.organization));
     where = this.applyScopes(where, modelSlug, ctx);
+
+    // Apply the validated client-selectable named scope (index/trashed only).
+    // ScopeService is @Optional() — fail CLOSED if it was never wired in.
+    if (parsed.scopeName) {
+      if (!this.scopes) {
+        throw RhinoException.forbidden(`Scope '${parsed.scopeName}' is not allowed`);
+      }
+      where = this.scopes.applyNamed(parsed.scopeName, where, reg, {
+        user: ctx.user,
+        organization: ctx.organization,
+        userRole: resolveUserRoleSlug(ctx.user, ctx.organization?.id),
+      });
+    }
 
     // soft delete visibility
     if (reg.softDeletes) {

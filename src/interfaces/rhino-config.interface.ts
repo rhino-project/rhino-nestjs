@@ -3,6 +3,7 @@ import type { NestMiddleware } from '@nestjs/common';
 import type { ZodSchema } from 'zod';
 import type { ResourcePolicy } from '../policies/resource-policy';
 import type { PrismaClientLike } from '../prisma/prisma.service';
+import type { RhinoNamedScope } from '../services/scope.service';
 
 export interface ModelRegistration {
   /** Prisma model name (camelCase or PascalCase — matches the delegate on prisma client) */
@@ -31,6 +32,14 @@ export interface ModelRegistration {
   auditExclude?: string[];
   computedAttributes?: (record: any, user: any) => Record<string, any>;
   scopes?: Type<any>[];
+  /**
+   * Client-selectable named scopes for ?scope=<key>. Only declared keys are
+   * callable. Each scope returns a Prisma where-fragment that Rhino ANDs into
+   * the query for index/trashed only.
+   */
+  namedScopes?: Record<string, Type<RhinoNamedScope>>;
+  /** Key of namedScopes applied when no ?scope param is sent. */
+  defaultScope?: string;
   /** Foreign-key constraints to verify against the current organization. */
   fkConstraints?: Array<{ field: string; model: string }>;
 }

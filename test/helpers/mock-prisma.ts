@@ -10,6 +10,12 @@ export function createMockPrisma(initialData: Record<string, any[]> = {}) {
   function matchesWhere(record: any, where: any): boolean {
     if (!where) return true;
     for (const [k, v] of Object.entries(where)) {
+      // Boolean combinators are handled by the OR/AND-aware `matches` wrapper;
+      // recurse through it so nested AND/OR compose correctly.
+      if (k === 'AND' || k === 'OR') {
+        if (!matches(record, { [k]: v })) return false;
+        continue;
+      }
       if (v == null && record[k] == null) continue;
       if (v != null && typeof v === 'object' && 'in' in (v as any)) {
         if (!(v as any).in.includes(record[k])) return false;
@@ -30,7 +36,23 @@ export function createMockPrisma(initialData: Record<string, any[]> = {}) {
         continue;
       }
       if (v != null && typeof v === 'object' && 'is' in (v as any)) {
-        if (!matchesWhere(record[k] ?? {}, (v as any).is)) return false;
+        if (!matches(record[k] ?? {}, (v as any).is)) return false;
+        continue;
+      }
+      // Relation quantifiers over an array-valued record field.
+      if (v != null && typeof v === 'object' && 'some' in (v as any)) {
+        const arr = Array.isArray(record[k]) ? record[k] : [];
+        if (!arr.some((el: any) => matches(el, (v as any).some))) return false;
+        continue;
+      }
+      if (v != null && typeof v === 'object' && 'none' in (v as any)) {
+        const arr = Array.isArray(record[k]) ? record[k] : [];
+        if (arr.some((el: any) => matches(el, (v as any).none))) return false;
+        continue;
+      }
+      if (v != null && typeof v === 'object' && 'every' in (v as any)) {
+        const arr = Array.isArray(record[k]) ? record[k] : [];
+        if (!arr.every((el: any) => matches(el, (v as any).every))) return false;
         continue;
       }
       if (record[k] !== v) return false;
@@ -38,16 +60,28 @@ export function createMockPrisma(initialData: Record<string, any[]> = {}) {
     return true;
   }
 
-  function applyOrWhere(record: any, where: any): boolean {
+  /**
+   * OR/AND-aware where evaluator. Every findMany/findFirst/count filter routes
+   * through this so top-level `AND` (produced by named scopes) and `OR`
+   * (produced by search) compose with the plain field matcher.
+   */
+  function matches(record: any, where: any): boolean {
     if (!where) return true;
-    if (where.OR && Array.isArray(where.OR)) {
-      const ok = where.OR.some((frag: any) => matchesWhere(record, frag));
-      const rest = { ...where };
-      delete rest.OR;
-      return ok && matchesWhere(record, rest);
+    const rest = { ...where };
+    let ok = true;
+    if (Array.isArray(where.AND)) {
+      ok = ok && where.AND.every((frag: any) => matches(record, frag));
+      delete rest.AND;
     }
-    return matchesWhere(record, where);
+    if (Array.isArray(where.OR)) {
+      ok = ok && where.OR.some((frag: any) => matches(record, frag));
+      delete rest.OR;
+    }
+    return ok && matchesWhere(record, rest);
   }
+
+  // Backwards-compatible alias for the delegate call sites below.
+  const applyOrWhere = matches;
 
   function makeDelegate(modelName: string) {
     if (!data[modelName]) data[modelName] = [];

@@ -72,7 +72,12 @@ export {
 } from './services/membership.service';
 export { NestedService } from './services/nested.service';
 export { OrganizationService } from './services/organization.service';
-export { ScopeService, type RhinoScope } from './services/scope.service';
+export {
+  ScopeService,
+  type RhinoScope,
+  type RhinoNamedScope,
+  type ScopeContext,
+} from './services/scope.service';
 export { applyRhinoRouting, describeRoutes } from './services/route-registration.service';
 
 // Prisma extensions

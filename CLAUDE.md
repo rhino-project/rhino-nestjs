@@ -99,6 +99,7 @@ This library provides the following features. When modifying or extending any of
 | 28 | **Blueprint System** | `blueprint/blueprint-parser.ts`, `blueprint/generators/` |
 | 29 | **Group Membership** (opt-in via `auth.enforceGroupMembership`) | `services/membership.service.ts`, `guards/group-membership.guard.ts`, `utils/permission-matcher.ts` |
 | 30 | **Group-Aware Auth & Lifecycle Hooks** | `controllers/auth.controller.ts`, `services/auth-hooks.service.ts`, `rhino-config.interface.ts` (`AuthLifecycleHooks`, per-group `auth`/`hooks`), `services/invitation.service.ts` (`route_group`) |
+| 31 | **Named Scopes** (`?scope=<key>`) | `services/scope.service.ts` (`RhinoNamedScope`, `applyNamed` — own-property + instance guard, AND-wrap), `services/query-builder.service.ts` (`build(..., { namedScopes })` whitelist + non-string reject), `services/resource.service.ts` (`findAll` applies it, fails closed when `ScopeService` absent), `rhino-config.interface.ts` (`namedScopes`/`defaultScope`), `rhino.config.ts` (`normalizeConfig` boot validation) |
 
 ### Group-auth hooks & token revocation (feature 30) — operator notes
 

@@ -175,6 +175,21 @@ export function normalizeConfig(config: RhinoConfig): RhinoConfig {
     },
   };
 
+  // Fail fast on a model whose defaultScope is not an own key of its
+  // namedScopes — a misconfigured default must never silently fall through to
+  // an unscoped listing.
+  for (const [slug, reg] of Object.entries(normalized.models)) {
+    if (reg.defaultScope == null) continue;
+    if (
+      !reg.namedScopes ||
+      !Object.prototype.hasOwnProperty.call(reg.namedScopes, reg.defaultScope)
+    ) {
+      throw new Error(
+        `Model '${slug}': defaultScope '${reg.defaultScope}' is not a declared key of namedScopes.`,
+      );
+    }
+  }
+
   // Fail fast on route groups that would silently shadow each other (same
   // prefix + intersecting host-set + overlapping models).
   validateRouteGroups(normalized);
