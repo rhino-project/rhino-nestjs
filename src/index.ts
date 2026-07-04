@@ -58,7 +58,11 @@ export { NestedController } from './controllers/nested.controller';
 
 // Services
 export { PrismaService, type PrismaClientLike } from './prisma/prisma.service';
-export { ResourceService } from './services/resource.service';
+export { ResourceService, type ResourceContext } from './services/resource.service';
+export {
+  ResourceScopeService,
+  type ScopedWhereOptions,
+} from './services/resource-scope.service';
 export { QueryBuilderService } from './services/query-builder.service';
 export { SerializerService, BASE_HIDDEN_COLUMNS } from './services/serializer.service';
 export { ValidationService } from './services/validation.service';

@@ -25,13 +25,13 @@ export interface ResourceContext {
 @Injectable()
 export class ResourceService {
   constructor(
-    private readonly prisma: PrismaService,
-    private readonly config: RhinoConfigService,
-    private readonly queryBuilder: QueryBuilderService,
-    @Optional() private readonly scopes?: ScopeService,
+    protected readonly prisma: PrismaService,
+    protected readonly config: RhinoConfigService,
+    protected readonly queryBuilder: QueryBuilderService,
+    @Optional() protected readonly scopes?: ScopeService,
   ) {}
 
-  private applyScopes(
+  protected applyScopes(
     where: Record<string, any>,
     modelSlug: string,
     ctx: ResourceContext,
@@ -46,7 +46,7 @@ export class ResourceService {
     });
   }
 
-  private delegate(modelSlug: string): any {
+  protected delegate(modelSlug: string): any {
     const reg = this.config.model(modelSlug);
     if (!reg) throw new Error(`Unknown model: ${modelSlug}`);
     return this.prisma.model(reg.model);

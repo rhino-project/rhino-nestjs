@@ -15,7 +15,8 @@ export type RhinoErrorCode =
   | 'NESTED_OPERATION_FAILED'
   | 'INCLUDE_NOT_AUTHORIZED'
   | 'AUTH_REJECTED'
-  | 'MEMBERSHIP_DENIED';
+  | 'MEMBERSHIP_DENIED'
+  | 'TENANT_CONTEXT_REQUIRED';
 
 export interface RhinoErrorBody {
   code: RhinoErrorCode;
@@ -80,6 +81,16 @@ export class RhinoException extends HttpException {
 
   static membershipDenied(message = 'You are not a member of this group.'): RhinoException {
     return new RhinoException('MEMBERSHIP_DENIED', message, 403);
+  }
+
+  /**
+   * Fail-closed guard for the resource-scope resolver: a model that
+   * `belongsToOrganization` was queried without an organization context.
+   */
+  static tenantContextRequired(
+    message = 'An organization context is required for this resource.',
+  ): RhinoException {
+    return new RhinoException('TENANT_CONTEXT_REQUIRED', message, 403);
   }
 }
 

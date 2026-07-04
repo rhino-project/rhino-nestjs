@@ -22,6 +22,7 @@ import type {
 } from './interfaces/rhino-config.interface';
 import { PrismaService } from './prisma/prisma.service';
 import { ResourceService } from './services/resource.service';
+import { ResourceScopeService } from './services/resource-scope.service';
 import { QueryBuilderService } from './services/query-builder.service';
 import { SerializerService } from './services/serializer.service';
 import { ValidationService } from './services/validation.service';
@@ -265,6 +266,7 @@ export class RhinoModule implements NestModule {
       RhinoConfigService,
       PrismaService,
       ResourceService,
+      ResourceScopeService,
       QueryBuilderService,
       SerializerService,
       ValidationService,
@@ -297,6 +299,7 @@ export class RhinoModule implements NestModule {
       RhinoConfigService,
       PrismaService,
       ResourceService,
+      ResourceScopeService,
       QueryBuilderService,
       SerializerService,
       ValidationService,

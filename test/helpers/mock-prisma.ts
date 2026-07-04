@@ -117,6 +117,62 @@ export function createMockPrisma(initialData: Record<string, any[]> = {}) {
       count: async (args: any = {}) => {
         return coll().filter((r) => applyOrWhere(r, args.where)).length;
       },
+      aggregate: async (args: any = {}) => {
+        const rows = coll().filter((r) => applyOrWhere(r, args.where));
+        const out: any = {};
+        if (args._count) {
+          if (args._count === true) {
+            out._count = rows.length;
+          } else {
+            out._count = {};
+            for (const field of Object.keys(args._count)) out._count[field] = rows.length;
+          }
+        }
+        if (args._sum) {
+          out._sum = {};
+          for (const field of Object.keys(args._sum)) {
+            out._sum[field] = rows.reduce((acc, r) => acc + (Number(r[field]) || 0), 0);
+          }
+        }
+        return out;
+      },
+      groupBy: async (args: any = {}) => {
+        const rows = coll().filter((r) => applyOrWhere(r, args.where));
+        const by: string[] = Array.isArray(args.by) ? args.by : [args.by];
+        const groups = new Map<string, any>();
+        for (const r of rows) {
+          const key = by.map((k) => JSON.stringify(r[k])).join('|');
+          if (!groups.has(key)) {
+            const g: any = {};
+            for (const k of by) g[k] = r[k];
+            g.__rows = [];
+            groups.set(key, g);
+          }
+          groups.get(key).__rows.push(r);
+        }
+        return Array.from(groups.values()).map((g) => {
+          const { __rows, ...dims } = g;
+          const out: any = { ...dims };
+          if (args._count) {
+            if (args._count === true) {
+              out._count = __rows.length;
+            } else {
+              out._count = {};
+              for (const field of Object.keys(args._count)) out._count[field] = __rows.length;
+            }
+          }
+          if (args._sum) {
+            out._sum = {};
+            for (const field of Object.keys(args._sum)) {
+              out._sum[field] = __rows.reduce(
+                (acc: number, r: any) => acc + (Number(r[field]) || 0),
+                0,
+              );
+            }
+          }
+          return out;
+        });
+      },
       create: async (args: any) => {
         const row = { id: autoId++, ...args.data };
         coll().push(row);
