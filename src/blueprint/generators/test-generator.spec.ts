@@ -184,4 +184,41 @@ describe('TestGenerator', () => {
     expect(output).toContain("describe('Post resource'");
     // Should not throw
   });
+
+  describe('route_key threading', () => {
+    function makeRouteKeyBlueprint(): Blueprint {
+      const bp = makeBlueprint();
+      bp.options = { ...bp.options, route_key: 'hashId' };
+      return bp;
+    }
+
+    it('emits routeKey in the generated makeConfig registration', () => {
+      const output = gen.generate(makeRouteKeyBlueprint());
+      expect(output).toContain(`routeKey: "hashId",`);
+    });
+
+    it('sampleRow carries a deterministic route-key value', () => {
+      const output = gen.generate(makeRouteKeyBlueprint());
+      expect(output).toContain('"hashId": "sample-route-key-1"');
+    });
+
+    it('member-endpoint calls address the record by the route-key value, not the PK', () => {
+      const output = gen.generate(makeRouteKeyBlueprint());
+      expect(output).toContain(`show('posts', "sample-route-key-1"`);
+      expect(output).toContain(`update('posts', "sample-route-key-1"`);
+      expect(output).toContain(`destroy('posts', "sample-route-key-1"`);
+      expect(output).not.toContain(`show('posts', '1'`);
+    });
+
+    it('keeps the PK literal for record assertions (id stays 1)', () => {
+      const output = gen.generate(makeRouteKeyBlueprint());
+      expect(output).toContain('id: 1');
+    });
+
+    it('without route_key the route param stays the PK (backwards compat)', () => {
+      const output = gen.generate(makeBlueprint());
+      expect(output).toContain(`show('posts', '1'`);
+      expect(output).not.toContain('routeKey');
+    });
+  });
 });

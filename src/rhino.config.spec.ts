@@ -63,6 +63,61 @@ describe('RhinoConfigService', () => {
     }
   });
 
+  describe('route key', () => {
+    it('routeKeyFor defaults to id when nothing is configured', () => {
+      const s = new RhinoConfigService(
+        normalizeConfig({ models: { posts: { model: 'post' } } }),
+      );
+      expect(s.globalRouteKey()).toBe('id');
+      expect(s.routeKeyFor('posts')).toBe('id');
+      expect(s.routeKeyFor('unknown')).toBe('id');
+    });
+
+    it('per-model routeKey beats the global default', () => {
+      const s = new RhinoConfigService(
+        normalizeConfig({
+          routeKey: 'uuid',
+          models: {
+            jobs: { model: 'job', routeKey: 'hashId' },
+            posts: { model: 'post' },
+          },
+        }),
+      );
+      expect(s.routeKeyFor('jobs')).toBe('hashId');
+      // global applies when the model is silent
+      expect(s.routeKeyFor('posts')).toBe('uuid');
+      expect(s.globalRouteKey()).toBe('uuid');
+    });
+
+    it('normalizeConfig throws on an empty-string global routeKey', () => {
+      expect(() => normalizeConfig({ models: {}, routeKey: '' })).toThrow(
+        /routeKey must be a non-empty string/,
+      );
+      expect(() => normalizeConfig({ models: {}, routeKey: '   ' })).toThrow(
+        /routeKey must be a non-empty string/,
+      );
+      expect(() => normalizeConfig({ models: {}, routeKey: 42 as any })).toThrow(
+        /routeKey must be a non-empty string/,
+      );
+    });
+
+    it('normalizeConfig throws on an empty-string per-model routeKey (names the model)', () => {
+      expect(() =>
+        normalizeConfig({ models: { jobs: { model: 'job', routeKey: '' } } }),
+      ).toThrow(/Model 'jobs'.*routeKey must be a non-empty string/);
+    });
+
+    it('normalizeConfig accepts valid route keys and no route keys', () => {
+      expect(() =>
+        normalizeConfig({
+          routeKey: 'uuid',
+          models: { jobs: { model: 'job', routeKey: 'hashId' } },
+        }),
+      ).not.toThrow();
+      expect(() => normalizeConfig({ models: { jobs: { model: 'job' } } })).not.toThrow();
+    });
+  });
+
   describe('group-auth accessors', () => {
     it('enforceGroupMembership defaults to false and reflects the flag', () => {
       expect(new RhinoConfigService(normalizeConfig({ models: {} })).enforceGroupMembership()).toBe(false);

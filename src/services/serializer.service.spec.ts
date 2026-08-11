@@ -1,5 +1,6 @@
 import { SerializerService } from './serializer.service';
 import { ResourcePolicy } from '../policies/resource-policy';
+import { RhinoConfigService, normalizeConfig } from '../rhino.config';
 import type { ModelRegistration } from '../interfaces/rhino-config.interface';
 
 describe('SerializerService', () => {
@@ -203,6 +204,47 @@ describe('SerializerService', () => {
         { model: 'x' }, // no policy
       );
       expect(out).toEqual({ id: 1, a: 1, b: 2 });
+    });
+  });
+
+  describe('route key retention', () => {
+    class TitleOnlyPolicy extends ResourcePolicy {
+      permittedAttributesForShow() {
+        return ['title'];
+      }
+    }
+    const record = { id: 1, hashId: 'h-1', uuid: 'u-1', title: 'T', secret: 'x' };
+
+    it('whitelist keeps the per-model routeKey column alongside id', () => {
+      const reg: ModelRegistration = { model: 'job', policy: TitleOnlyPolicy, routeKey: 'hashId' };
+      const out = s.serializeOne(record, reg);
+      expect(out).toEqual({ id: 1, hashId: 'h-1', title: 'T' });
+    });
+
+    it('whitelist keeps the GLOBAL routeKey column when config is injected', () => {
+      const config = new RhinoConfigService(
+        normalizeConfig({ routeKey: 'uuid', models: { jobs: { model: 'job' } } }),
+      );
+      const withCfg = new SerializerService(config);
+      const reg: ModelRegistration = { model: 'job', policy: TitleOnlyPolicy };
+      const out = withCfg.serializeOne(record, reg);
+      expect(out).toEqual({ id: 1, uuid: 'u-1', title: 'T' });
+    });
+
+    it('per-model routeKey beats the injected global default', () => {
+      const config = new RhinoConfigService(
+        normalizeConfig({ routeKey: 'uuid', models: { jobs: { model: 'job' } } }),
+      );
+      const withCfg = new SerializerService(config);
+      const reg: ModelRegistration = { model: 'job', policy: TitleOnlyPolicy, routeKey: 'hashId' };
+      const out = withCfg.serializeOne(record, reg);
+      expect(out).toEqual({ id: 1, hashId: 'h-1', title: 'T' });
+    });
+
+    it('no routeKey configured keeps only id (legacy behavior)', () => {
+      const reg: ModelRegistration = { model: 'job', policy: TitleOnlyPolicy };
+      const out = s.serializeOne(record, reg);
+      expect(out).toEqual({ id: 1, title: 'T' });
     });
   });
 });

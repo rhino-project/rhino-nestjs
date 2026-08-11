@@ -13,6 +13,13 @@ export interface BlueprintOptions {
   /** When true, primary key is `String @default(uuid())` instead of `Int @default(autoincrement())`. */
   has_uuid: boolean;
   /**
+   * Column matched against the `:id` URL segment on member endpoints
+   * (e.g. `route_key: hash_id` → `GET /api/jobs/{hash_id}`).
+   * Null/absent = primary key. Optional so hand-built Blueprint literals
+   * (and pre-existing consumers) stay source-compatible.
+   */
+  route_key?: string | null;
+  /**
    * BP-004: legacy single-hop owner. Kept for backwards compat; prefer
    * `owner_chain` for multi-hop indirect tenancy.
    */
@@ -159,12 +166,23 @@ export class BlueprintParser {
       soft_deletes: Boolean(opts['soft_deletes'] ?? true),
       audit_trail: Boolean(opts['audit_trail'] ?? false),
       has_uuid: Boolean(opts['has_uuid'] ?? false),
+      route_key: this.normalizeRouteKey(opts['route_key']),
       owner: (opts['owner'] as string) ?? null,
       owner_chain: this.normalizeOwnerChain(opts['owner_chain']),
       except_actions: Array.isArray(opts['except_actions']) ? (opts['except_actions'] as string[]) : [],
       pagination: Boolean(opts['pagination'] ?? false),
       per_page: Number(opts['per_page'] ?? 25),
     };
+  }
+
+  /**
+   * Normalize `route_key`: non-empty string → trimmed string, anything else
+   * (absent, null, '', non-string) → null (primary-key routing).
+   */
+  private normalizeRouteKey(raw: unknown): string | null {
+    if (typeof raw !== 'string') return null;
+    const trimmed = raw.trim();
+    return trimmed.length > 0 ? trimmed : null;
   }
 
   /**

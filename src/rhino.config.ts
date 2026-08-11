@@ -114,6 +114,19 @@ export class RhinoConfigService {
     return this.config.multiTenant?.organizationIdentifierColumn ?? 'id';
   }
 
+  /** Global default route key (root `routeKey`), `'id'` when unset. */
+  globalRouteKey(): string {
+    return this.config.routeKey ?? 'id';
+  }
+
+  /**
+   * Column matched against the `:id` URL segment for a model's member
+   * endpoints. Resolution: `models[slug].routeKey ?? config.routeKey ?? 'id'`.
+   */
+  routeKeyFor(slug: string): string {
+    return this.model(slug)?.routeKey ?? this.globalRouteKey();
+  }
+
   nestedConfig() {
     return {
       path: this.config.nested?.path ?? 'nested',
@@ -174,6 +187,22 @@ export function normalizeConfig(config: RhinoConfig): RhinoConfig {
       ...(config.auth ?? {}),
     },
   };
+
+  // Fail fast on an invalid route key: any provided `routeKey` (global or
+  // per-model) must be a non-empty string. A blank/typoed key would silently
+  // break every member endpoint, so this is a boot error.
+  const validateRouteKey = (value: unknown, where: string) => {
+    if (value === undefined) return;
+    if (typeof value !== 'string' || value.trim() === '') {
+      throw new Error(
+        `${where}: routeKey must be a non-empty string (e.g. 'hashId'); got ${JSON.stringify(value)}.`,
+      );
+    }
+  };
+  validateRouteKey(normalized.routeKey, 'Rhino config');
+  for (const [slug, reg] of Object.entries(normalized.models)) {
+    validateRouteKey(reg.routeKey, `Model '${slug}'`);
+  }
 
   // Fail fast on a model whose defaultScope is not an own key of its
   // namedScopes — a misconfigured default must never silently fall through to

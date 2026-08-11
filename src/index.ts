@@ -95,6 +95,7 @@ export {
   BelongsToOrganization,
   HasAuditTrail,
   HasUuid,
+  RouteKey,
   HasSoftDeletes,
   ExceptActions,
   HidableColumns,

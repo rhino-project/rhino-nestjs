@@ -311,9 +311,16 @@ export class GlobalController {
     });
     if (!ok) throw RhinoException.notFound();
     if (reg.hasAuditTrail) {
+      // Log the record's REAL primary key, not the raw route param — with a
+      // custom routeKey the two diverge (and this also fixes the pre-existing
+      // inconsistency with show/update/destroy, which log the record id).
+      const restored = await this.resources.findOne(modelSlug, id, {}, {
+        user: req.user,
+        organization: req.organization,
+      });
       await this.audit.log({
         auditableType: reg.model,
-        auditableId: id,
+        auditableId: (restored as any)?.id ?? id,
         action: 'restored',
         ctx: { user: req.user, organization: req.organization },
       });

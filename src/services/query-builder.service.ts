@@ -1,5 +1,6 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable, Optional } from '@nestjs/common';
 import type { ModelRegistration } from '../interfaces/rhino-config.interface';
+import { RhinoConfigService } from '../rhino.config';
 import { RhinoException } from '../errors/rhino-exception';
 
 export interface ParsedQuery {
@@ -26,6 +27,13 @@ export interface ParsedQuery {
  */
 @Injectable()
 export class QueryBuilderService {
+  /**
+   * Config is optional for backwards compatibility (`new QueryBuilderService()`
+   * in older tests/consumers) — without it, only the per-model `routeKey`
+   * is seeded into `?fields[]` selects (global default falls back to 'id').
+   */
+  constructor(@Optional() private readonly config?: RhinoConfigService) {}
+
   build(
     query: Record<string, any>,
     reg: ModelRegistration,
@@ -159,6 +167,10 @@ export class QueryBuilderService {
     const allowed = new Set(reg.allowedFields ?? []);
     const names = String(raw).split(',').map((s) => s.trim()).filter(Boolean);
     const select: Record<string, any> = { id: true };
+    // Seed the resolved route-key column too, so ?fields[] responses always
+    // include the value clients need to address the record.
+    const routeKey = reg.routeKey ?? this.config?.globalRouteKey() ?? 'id';
+    if (routeKey !== 'id') select[routeKey] = true;
     for (const name of names) {
       if (allowed.size > 0 && !allowed.has(name)) {
         throw new BadRequestException(`Field not allowed: ${name}`);

@@ -75,6 +75,27 @@ describe('QueryBuilderService', () => {
     expect(q.select).toEqual({ id: true, title: true, status: true });
   });
 
+  it('seeds the per-model routeKey column into select', () => {
+    const rkReg: ModelRegistration = { ...reg, routeKey: 'hashId' };
+    const q = qb.build({ fields: { posts: 'title' } }, rkReg);
+    expect(q.select).toEqual({ id: true, hashId: true, title: true });
+  });
+
+  it('seeds the global routeKey column into select via injected config', () => {
+    const { RhinoConfigService, normalizeConfig } = require('../rhino.config');
+    const config = new RhinoConfigService(
+      normalizeConfig({ routeKey: 'uuid', models: { posts: { model: 'post' } } }),
+    );
+    const qbWithCfg = new QueryBuilderService(config);
+    const q = qbWithCfg.build({ fields: { posts: 'title' } }, reg);
+    expect(q.select).toEqual({ id: true, uuid: true, title: true });
+  });
+
+  it('does not double-seed when routeKey is id', () => {
+    const q = qb.build({ fields: { posts: 'title' } }, { ...reg, routeKey: 'id' });
+    expect(q.select).toEqual({ id: true, title: true });
+  });
+
   it('rejects fields not in allowedFields', () => {
     expect(() => qb.build({ fields: { posts: 'internal' } }, reg)).toThrow(/Field not allowed/);
   });

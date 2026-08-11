@@ -1,5 +1,6 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Optional } from '@nestjs/common';
 import type { ModelRegistration } from '../interfaces/rhino-config.interface';
+import { RhinoConfigService } from '../rhino.config';
 
 export const BASE_HIDDEN_COLUMNS = [
   'password',
@@ -43,6 +44,18 @@ export interface SerializeContext {
 @Injectable()
 export class SerializerService {
   /**
+   * Config is optional for backwards compatibility (`new SerializerService()`
+   * in older tests/consumers) — without it, only the per-model `routeKey`
+   * participates in whitelist retention (the global default falls back to 'id').
+   */
+  constructor(@Optional() private readonly config?: RhinoConfigService) {}
+
+  /** Resolved route key: per-model, then global config default, then 'id'. */
+  private routeKeyOf(reg: ModelRegistration): string {
+    return reg.routeKey ?? this.config?.globalRouteKey() ?? 'id';
+  }
+
+  /**
    * @param record  The raw record to serialize (from Prisma).
    * @param reg     The model registration driving policy + computed attrs.
    * @param ctx     Either a `SerializeContext` object (preferred) or a
@@ -80,7 +93,9 @@ export class SerializerService {
 
       const permitted = policy.permittedAttributesForShow(user, organization) ?? ['*'];
       if (!(permitted.length === 1 && permitted[0] === '*')) {
-        const keep = new Set([...permitted, 'id']);
+        // Always keep `id` AND the resolved route-key column — a whitelist
+        // must never strip the value clients need to address the record.
+        const keep = new Set([...permitted, 'id', this.routeKeyOf(reg)]);
         result = Object.fromEntries(
           Object.entries(result).filter(([k]) => keep.has(k)),
         ) as any;

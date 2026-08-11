@@ -28,6 +28,15 @@ export interface ModelRegistration {
   belongsToOrganization?: boolean;
   hasAuditTrail?: boolean;
   hasUuid?: boolean;
+  /**
+   * Column matched against the `:id` URL segment on member endpoints
+   * (show/update/destroy/restore/force-delete), e.g. `routeKey: 'hashId'`
+   * → `GET /api/jobs/{hash_id}`. Falls back to the root config's `routeKey`,
+   * then `'id'`. When the resolved key is not `'id'` the param is treated as
+   * a string (never coerced to a number). Affects ONLY the URL-segment
+   * lookup — nested operations and FK validation stay primary-key based.
+   */
+  routeKey?: string;
   additionalHiddenColumns?: string[];
   auditExclude?: string[];
   computedAttributes?: (record: any, user: any) => Record<string, any>;
@@ -167,6 +176,12 @@ export interface RhinoConfig {
    */
   prismaClient?: PrismaClientLike;
   models: Record<string, ModelRegistration>;
+  /**
+   * Global default for {@link ModelRegistration.routeKey}. A model without its
+   * own `routeKey` uses this; when neither is set the primary key `'id'` is
+   * used (byte-identical to previous behavior).
+   */
+  routeKey?: string;
   routeGroups?: Record<string, RouteGroupConfig>;
   multiTenant?: MultiTenantConfig;
   nested?: NestedConfig;

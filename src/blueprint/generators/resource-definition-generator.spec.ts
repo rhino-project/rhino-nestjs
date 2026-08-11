@@ -180,6 +180,18 @@ describe('ResourceDefinitionGenerator', () => {
     expect(output).toContain("z.enum(['draft', 'published'])");
   });
 
+  it('emits routeKey on ModelRegistration when options.route_key is set', () => {
+    const bp = makeBlueprint();
+    bp.options.route_key = 'hashId';
+    const output = gen.generate(bp);
+    expect(output).toContain(`routeKey: "hashId",`);
+  });
+
+  it('omits routeKey when route_key is absent (avoid noise)', () => {
+    const output = gen.generate(makeBlueprint());
+    expect(output).not.toContain('routeKey');
+  });
+
   it('omits allowedFilters when no columns are filterable', () => {
     const bp = makeBlueprint({
       columns: [

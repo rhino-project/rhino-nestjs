@@ -63,6 +63,8 @@ export interface ModelDefinition {
     except?: string[];
   };
 
+  /** Column matched against the `:id` URL segment (see ModelRegistration.routeKey). */
+  routeKey?: ModelRegistration['routeKey'];
   middleware?: ModelRegistration['middleware'];
   actionMiddleware?: ModelRegistration['actionMiddleware'];
   scopes?: ModelRegistration['scopes'];
@@ -108,6 +110,7 @@ export function defineModel(def: ModelDefinition): ModelRegistration {
   if (def.restrict?.except) out.exceptActions = def.restrict.except;
 
   // pass-through
+  if (def.routeKey) out.routeKey = def.routeKey;
   if (def.middleware) out.middleware = def.middleware;
   if (def.actionMiddleware) out.actionMiddleware = def.actionMiddleware;
   if (def.scopes) out.scopes = def.scopes;

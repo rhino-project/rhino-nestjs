@@ -38,7 +38,13 @@ export class TestGenerator {
       ? sampleRow.id // already UUID from buildSampleRow
       : 1;
     const idLiteral = options.has_uuid ? `'${sampleId}'` : '1';
-    const idRouteParam = options.has_uuid ? `'${sampleId}'` : "'1'";
+    // Route-key models address member endpoints by the route-key column's
+    // value; the PK literal stays for assertions on the record itself.
+    const idRouteParam = options.route_key
+      ? JSON.stringify(String(sampleRow[options.route_key]))
+      : options.has_uuid
+        ? `'${sampleId}'`
+        : "'1'";
 
     const lines: string[] = [];
     const push = (s = '') => lines.push(s);
@@ -61,6 +67,9 @@ export class TestGenerator {
     push(`        belongsToOrganization: ${options.belongs_to_organization},`);
     push(`        softDeletes: ${options.soft_deletes},`);
     push(`        hasAuditTrail: ${options.audit_trail},`);
+    if (options.route_key) {
+      push(`        routeKey: ${JSON.stringify(options.route_key)},`);
+    }
     push(`      },`);
     push(`    },`);
     push(`    ...overrides,`);
@@ -203,6 +212,11 @@ export class TestGenerator {
     for (const col of blueprint.columns) {
       row[col.name] = this.sampleValue(col.type, col.values);
     }
+    // Route-key models must carry a deterministic route-key value so the
+    // generated specs can address member endpoints by it. Digit-only on
+    // purpose is avoided; keep it clearly non-numeric.
+    const routeKey = blueprint.options.route_key;
+    if (routeKey) row[routeKey] = 'sample-route-key-1';
     if (blueprint.options.belongs_to_organization) row['organizationId'] = 1;
     return row;
   }

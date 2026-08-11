@@ -56,6 +56,17 @@ export function HasUuid(): ClassDecorator {
   };
 }
 
+/**
+ * Sets the column matched against the `:id` URL segment on member endpoints,
+ * e.g. `@RouteKey('hashId')` → `GET /api/jobs/{hash_id}`.
+ */
+export function RouteKey(key: string): ClassDecorator {
+  return (target) => {
+    const existing = (Reflect.getMetadata(RHINO_MODEL_METADATA, target) ?? {}) as ModelRegistration;
+    Reflect.defineMetadata(RHINO_MODEL_METADATA, { ...existing, routeKey: key }, target);
+  };
+}
+
 export function HasSoftDeletes(): ClassDecorator {
   return (target) => {
     const existing = (Reflect.getMetadata(RHINO_MODEL_METADATA, target) ?? {}) as ModelRegistration;

@@ -90,6 +90,10 @@ export class ResourceDefinitionGenerator {
       // BP-005: surface the flag so ResourceService.castId preserves string IDs
       lines.push(`  hasUuid: true,`);
     }
+    if (blueprint.options.route_key) {
+      // Member endpoints match `:id` against this column instead of the PK.
+      lines.push(`  routeKey: ${JSON.stringify(blueprint.options.route_key)},`);
+    }
 
     // BP-004: emit `owner` / `fkConstraints` from YAML when declared so
     // ValidationService.verifyTenantFks (and the FK chain walker) can do

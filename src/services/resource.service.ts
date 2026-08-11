@@ -52,6 +52,28 @@ export class ResourceService {
     return this.prisma.model(reg.model);
   }
 
+  /**
+   * Build the where fragment matching the `:id` URL segment. When the model's
+   * resolved route key is `'id'` (the default) this is byte-identical to the
+   * legacy behavior including `castId` numification. For a custom route key
+   * the param is ALWAYS treated as a string — a digit-only hash like "48291"
+   * must not be coerced to a number.
+   */
+  protected idWhere(
+    modelSlug: string,
+    id: string | number,
+    hasUuid?: boolean,
+  ): Record<string, any> {
+    const key = this.config.routeKeyFor(modelSlug);
+    if (key === 'id') return { id: this.castId(id, hasUuid) };
+    return { [key]: String(id) };
+  }
+
+  /** Whether the model resolves its `:id` segment via a non-PK route key. */
+  protected hasCustomRouteKey(modelSlug: string): boolean {
+    return this.config.routeKeyFor(modelSlug) !== 'id';
+  }
+
   /** Resolve Prisma where filter for the current org context. */
   protected orgFilter(modelSlug: string, org?: any): Record<string, any> | null {
     if (!org) return null;
@@ -128,7 +150,7 @@ export class ResourceService {
     if (!reg) throw new Error(`Unknown model: ${modelSlug}`);
     const delegate = this.delegate(modelSlug);
     const parsed = this.queryBuilder.build(rawQuery, reg);
-    let where: Record<string, any> = { id: this.castId(id, reg.hasUuid) };
+    let where: Record<string, any> = this.idWhere(modelSlug, id, reg.hasUuid);
     const orgScope = this.orgFilter(modelSlug, ctx.organization);
     if (orgScope) Object.assign(where, orgScope);
     where = this.applyScopes(where, modelSlug, ctx);
@@ -151,7 +173,7 @@ export class ResourceService {
     const reg = this.config.model(modelSlug);
     if (!reg) throw new Error(`Unknown model: ${modelSlug}`);
     const delegate = this.delegate(modelSlug);
-    const where: Record<string, any> = { id: this.castId(id, reg.hasUuid) };
+    const where: Record<string, any> = this.idWhere(modelSlug, id, reg.hasUuid);
     const orgScope = this.orgFilter(modelSlug, ctx.organization);
     if (orgScope) Object.assign(where, orgScope);
 
@@ -166,6 +188,14 @@ export class ResourceService {
       if (res.count === 0) return null;
       return delegate.findFirst({ where });
     }
+    // A custom route key is not guaranteed unique for Prisma's typed `update`
+    // where — resolve the record first, then mutate by primary key. Mirrors
+    // the org-scoped branch's not-found semantics (null when no match).
+    if (this.hasCustomRouteKey(modelSlug)) {
+      const existing = await delegate.findFirst({ where });
+      if (!existing) return null;
+      return delegate.update({ where: { id: existing.id }, data: payload });
+    }
     return delegate.update({ where: { id: this.castId(id, reg.hasUuid) }, data: payload });
   }
 
@@ -173,7 +203,7 @@ export class ResourceService {
     const reg = this.config.model(modelSlug);
     if (!reg) throw new Error(`Unknown model: ${modelSlug}`);
     const delegate = this.delegate(modelSlug);
-    const where: Record<string, any> = { id: this.castId(id, reg.hasUuid) };
+    const where: Record<string, any> = this.idWhere(modelSlug, id, reg.hasUuid);
     const orgScope = this.orgFilter(modelSlug, ctx.organization);
     if (orgScope) Object.assign(where, orgScope);
 
@@ -185,6 +215,14 @@ export class ResourceService {
       const res = await delegate.deleteMany({ where });
       return res.count > 0;
     }
+    // Custom route key: not unique for Prisma's typed `delete` where — resolve
+    // then delete by primary key, with org-branch not-found semantics (false).
+    if (this.hasCustomRouteKey(modelSlug)) {
+      const existing = await delegate.findFirst({ where });
+      if (!existing) return false;
+      await delegate.delete({ where: { id: existing.id } });
+      return true;
+    }
     await delegate.delete({ where: { id: this.castId(id, reg.hasUuid) } });
     return true;
   }
@@ -193,7 +231,7 @@ export class ResourceService {
     const reg = this.config.model(modelSlug);
     if (!reg?.softDeletes) throw new Error(`Model ${modelSlug} does not support soft deletes`);
     const delegate = this.delegate(modelSlug);
-    const where: Record<string, any> = { id: this.castId(id, reg.hasUuid) };
+    const where: Record<string, any> = this.idWhere(modelSlug, id, reg.hasUuid);
     const orgScope = this.orgFilter(modelSlug, ctx.organization);
     if (orgScope) Object.assign(where, orgScope);
     const res = await delegate.updateMany({ where, data: { deletedAt: null } });
@@ -204,12 +242,19 @@ export class ResourceService {
     const reg = this.config.model(modelSlug);
     if (!reg) throw new Error(`Unknown model: ${modelSlug}`);
     const delegate = this.delegate(modelSlug);
-    const where: Record<string, any> = { id: this.castId(id, reg.hasUuid) };
+    const where: Record<string, any> = this.idWhere(modelSlug, id, reg.hasUuid);
     const orgScope = this.orgFilter(modelSlug, ctx.organization);
     if (orgScope) Object.assign(where, orgScope);
     if (orgScope) {
       const res = await delegate.deleteMany({ where });
       return res.count > 0;
+    }
+    // Custom route key: resolve then hard-delete by primary key (see delete()).
+    if (this.hasCustomRouteKey(modelSlug)) {
+      const existing = await delegate.findFirst({ where });
+      if (!existing) return false;
+      await delegate.delete({ where: { id: existing.id } });
+      return true;
     }
     await delegate.delete({ where: { id: this.castId(id, reg.hasUuid) } });
     return true;

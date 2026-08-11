@@ -118,6 +118,26 @@ columns:
     expect(bp.options.soft_deletes).toBe(true); // default
     expect(bp.options.belongs_to_organization).toBe(false);
     expect(bp.options.per_page).toBe(25);
+    expect(bp.options.route_key).toBeNull(); // default = primary key routing
+  });
+
+  it('parses options.route_key as a trimmed string', () => {
+    const file = writeTmp(`
+model: Job
+options:
+  route_key: "  hashId  "
+`);
+    const bp = parser.parseModel(file);
+    expect(bp.options.route_key).toBe('hashId');
+  });
+
+  it('normalizes empty/non-string route_key to null', () => {
+    const empty = parser.parseModel(writeTmp(`model: Job\noptions:\n  route_key: ""\n`));
+    expect(empty.options.route_key).toBeNull();
+    const nullish = parser.parseModel(writeTmp(`model: Job\noptions:\n  route_key: null\n`));
+    expect(nullish.options.route_key).toBeNull();
+    const nonString = parser.parseModel(writeTmp(`model: Job\noptions:\n  route_key: 42\n`));
+    expect(nonString.options.route_key).toBeNull();
   });
 
   // ---- missing required fields --------------------------------------------

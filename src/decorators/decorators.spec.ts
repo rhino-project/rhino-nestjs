@@ -4,6 +4,7 @@ import {
   BelongsToOrganization,
   HasAuditTrail,
   HasUuid,
+  RouteKey,
   HasSoftDeletes,
   ExceptActions,
   HidableColumns,
@@ -23,6 +24,7 @@ describe('model decorators', () => {
     @BelongsToOrganization()
     @HasAuditTrail(['password'])
     @HasUuid()
+    @RouteKey('hashId')
     @HasSoftDeletes()
     @ExceptActions(['destroy'])
     @HidableColumns(['secret'])
@@ -32,8 +34,16 @@ describe('model decorators', () => {
     expect(meta.hasAuditTrail).toBe(true);
     expect(meta.auditExclude).toEqual(['password']);
     expect(meta.hasUuid).toBe(true);
+    expect(meta.routeKey).toBe('hashId');
     expect(meta.softDeletes).toBe(true);
     expect(meta.exceptActions).toEqual(['destroy']);
     expect(meta.additionalHiddenColumns).toEqual(['secret']);
+  });
+
+  it('@RouteKey sets the routeKey column', () => {
+    @RouteKey('hashId')
+    class Job {}
+    const meta = getRhinoModelMetadata(Job)!;
+    expect(meta.routeKey).toBe('hashId');
   });
 });

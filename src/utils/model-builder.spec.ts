@@ -79,6 +79,13 @@ describe('defineModel', () => {
     expect(reg.fkConstraints).toEqual([{ field: 'projectId', model: 'project' }]);
   });
 
+  it('passes through routeKey', () => {
+    const reg = defineModel({ model: 'job', routeKey: 'hashId' });
+    expect(reg.routeKey).toBe('hashId');
+    // absent → not set (primary-key routing)
+    expect(defineModel({ model: 'job' }).routeKey).toBeUndefined();
+  });
+
   it('passes through policy reference', () => {
     const reg = defineModel({ model: 'post', policy: PostPolicy });
     expect(reg.policy).toBe(PostPolicy);
