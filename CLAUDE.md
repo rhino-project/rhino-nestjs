@@ -83,7 +83,7 @@ This library provides the following features. When modifying or extending any of
 | 12 | **Field Selection** | `query-builder.service.ts` (`buildSelect`) |
 | 13 | **Eager Loading** | `query-builder.service.ts` (`buildInclude`) |
 | 14 | **Multi-Tenancy** | `organization.service.ts`, `resolve-organization.middleware.ts`, `resource.service.ts` |
-| 15 | **Nested Ownership** | `resource.service.ts` (`orgFilter`) |
+| 15 | **Nested Ownership** (`owner` chains → indirect tenant scoping) | `resource.service.ts` (`orgFilter` — nested relation filter, `withOrgScope` AND-composition), `rhino.config.ts` (`orgPathFor` — boot-time chain resolution; unresolvable chains warn + stay unscoped, never throw), `resource-scope.service.ts` (`scopedWhere` fails closed for owner-chain models too) |
 | 16 | **Route Groups** (incl. domain-aware groups via per-group `domain`) | `rhino-config.interface.ts`, `route-registration.service.ts`, `middleware/route-group.middleware.ts`, `middleware/domain-route-resolver.ts`, `utils/domain-pattern.ts` |
 | 17 | **Soft Deletes** | `resource.service.ts`, `global.controller.ts` |
 | 18 | **Audit Trail** | `audit.service.ts`, `global.controller.ts` |

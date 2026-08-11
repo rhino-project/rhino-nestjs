@@ -193,4 +193,132 @@ describe('RhinoConfigService', () => {
       expect(s.isTenantGroup(null)).toBe(false);
     });
   });
+
+  describe('owner chain resolution (orgPathFor)', () => {
+    let warnSpy: jest.SpyInstance;
+    beforeEach(() => {
+      warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+    });
+    afterEach(() => warnSpy.mockRestore());
+
+    const service = (models: Record<string, any>) =>
+      new RhinoConfigService(normalizeConfig({ models }));
+
+    it('resolves a single hop to the org-scoped root', () => {
+      const s = service({
+        projects: { model: 'Project', belongsToOrganization: true },
+        tasks: { model: 'Task', owner: 'project' },
+      });
+      expect(s.orgPathFor('tasks')).toEqual(['project']);
+      expect(warnSpy).not.toHaveBeenCalled();
+    });
+
+    it('resolves a two-hop chain (comments → task → project)', () => {
+      const s = service({
+        projects: { model: 'Project', belongsToOrganization: true },
+        tasks: { model: 'Task', owner: 'project' },
+        comments: { model: 'Comment', owner: 'task' },
+      });
+      expect(s.orgPathFor('comments')).toEqual(['task', 'project']);
+      expect(s.orgPathFor('tasks')).toEqual(['project']);
+    });
+
+    it('matches the owning registration by model name case-insensitively', () => {
+      const s = service({
+        workspaces: { model: 'Project', belongsToOrganization: true },
+        tasks: { model: 'Task', owner: 'project' },
+      });
+      // slug 'workspaces' would never match 'project' — the model name does.
+      expect(s.orgPathFor('tasks')).toEqual(['project']);
+    });
+
+    it('falls back to slug matching with naive pluralization', () => {
+      const s = service({
+        projects: { model: 'ProjectRecord', belongsToOrganization: true },
+        categories: { model: 'CategoryRecord', belongsToOrganization: true },
+        tasks: { model: 'Task', owner: 'project' },
+        posts: { model: 'Post', owner: 'category' },
+      });
+      expect(s.orgPathFor('tasks')).toEqual(['project']); // project → projects
+      expect(s.orgPathFor('posts')).toEqual(['category']); // category → categories
+    });
+
+    it('supports a dot-notated owner chain (task.project)', () => {
+      const s = service({
+        projects: { model: 'Project', belongsToOrganization: true },
+        tasks: { model: 'Task' }, // no owner of its own
+        comments: { model: 'Comment', owner: 'task.project' },
+      });
+      expect(s.orgPathFor('comments')).toEqual(['task', 'project']);
+    });
+
+    it('accepts a legacy FK-column owner (userId → relation user)', () => {
+      const s = service({
+        users: { model: 'User', belongsToOrganization: true },
+        profiles: { model: 'Profile', owner: 'userId' },
+      });
+      expect(s.orgPathFor('profiles')).toEqual(['user']);
+    });
+
+    it('unknown owner → warns at boot and resolves to null (unscoped)', () => {
+      const s = service({
+        projects: { model: 'Project', belongsToOrganization: true },
+        tasks: { model: 'Task', owner: 'nonexistent' },
+      });
+      expect(s.orgPathFor('tasks')).toBeNull();
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining("Model 'tasks': owner chain could not be resolved"),
+      );
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining("owner 'nonexistent' does not name a registered model"),
+      );
+    });
+
+    it('cycle → warns and resolves to null instead of hanging', () => {
+      const s = service({
+        as: { model: 'A', owner: 'b' },
+        bs: { model: 'B', owner: 'a' },
+      });
+      expect(s.orgPathFor('as')).toBeNull();
+      expect(s.orgPathFor('bs')).toBeNull();
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('cycle detected'));
+    });
+
+    it('chain that dead-ends before an org-scoped registration → warns and resolves to null', () => {
+      const s = service({
+        projects: { model: 'Project' }, // NOT org-scoped, no owner
+        tasks: { model: 'Task', owner: 'project' },
+      });
+      expect(s.orgPathFor('tasks')).toBeNull();
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('dead-ends'));
+    });
+
+    it('owner + belongsToOrganization → direct scoping wins, no path, no warning', () => {
+      const s = service({
+        projects: { model: 'Project', belongsToOrganization: true },
+        tasks: { model: 'Task', owner: 'project', belongsToOrganization: true },
+      });
+      expect(s.orgPathFor('tasks')).toBeNull();
+      expect(warnSpy).not.toHaveBeenCalled();
+    });
+
+    it('models without owner resolve to null with no warning', () => {
+      const s = service({
+        projects: { model: 'Project', belongsToOrganization: true },
+        tags: { model: 'Tag' },
+      });
+      expect(s.orgPathFor('projects')).toBeNull();
+      expect(s.orgPathFor('tags')).toBeNull();
+      expect(s.orgPathFor('unknown')).toBeNull();
+      expect(warnSpy).not.toHaveBeenCalled();
+    });
+
+    it('self-referencing owner → warns as a cycle, never loops', () => {
+      const s = service({
+        folders: { model: 'Folder', owner: 'folder' },
+      });
+      expect(s.orgPathFor('folders')).toBeNull();
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('cycle detected'));
+    });
+  });
 });

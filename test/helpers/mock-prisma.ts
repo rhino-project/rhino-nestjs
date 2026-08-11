@@ -55,9 +55,41 @@ export function createMockPrisma(initialData: Record<string, any[]> = {}) {
         if (!arr.every((el: any) => matches(el, (v as any).every))) return false;
         continue;
       }
+      // To-one relation filter: the filter value is a plain object filter and
+      // the row carries a `<key>Id` FK — resolve the related row from the
+      // client's dataset and recursively match (Prisma relation semantics: a
+      // null/dangling FK never matches).
+      if (
+        v != null &&
+        typeof v === 'object' &&
+        !Array.isArray(v) &&
+        record != null &&
+        `${k}Id` in record
+      ) {
+        const related = resolveToOneRelation(k, record);
+        if (!related || !matches(related, v)) return false;
+        continue;
+      }
       if (record[k] !== v) return false;
     }
     return true;
+  }
+
+  /**
+   * Resolve a to-one relation for `record` by relation field name: the FK is
+   * `<field>Id` and the target collection is looked up in the client's data by
+   * the field name (case-insensitive), falling back to a naive plural.
+   */
+  function resolveToOneRelation(field: string, record: any): any | null {
+    const fk = record[`${field}Id`];
+    if (fk == null) return null;
+    const lower = field.toLowerCase();
+    const keys = Object.keys(data);
+    const collectionKey =
+      keys.find((k) => k.toLowerCase() === lower) ??
+      keys.find((k) => k.toLowerCase() === `${lower}s`);
+    if (!collectionKey) return null;
+    return data[collectionKey].find((r) => r?.id === fk) ?? null;
   }
 
   /**

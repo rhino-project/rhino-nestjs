@@ -74,12 +74,47 @@ export class ResourceService {
     return this.config.routeKeyFor(modelSlug) !== 'id';
   }
 
-  /** Resolve Prisma where filter for the current org context. */
+  /**
+   * Resolve Prisma where filter for the current org context.
+   *
+   * - `belongsToOrganization` → direct `{ organizationId }` (unchanged).
+   * - `owner` chain (indirect tenancy resolved at boot by
+   *   `RhinoConfigService.orgPathFor`) → nested relation filter, e.g.
+   *   comments → `{ task: { project: { organizationId } } }`.
+   * - Neither (or unresolvable chain) → null (unscoped, legacy behavior).
+   */
   protected orgFilter(modelSlug: string, org?: any): Record<string, any> | null {
     if (!org) return null;
     const reg = this.config.model(modelSlug);
-    if (!reg?.belongsToOrganization) return null;
-    return { organizationId: org.id };
+    if (!reg) return null;
+    if (reg.belongsToOrganization) return { organizationId: org.id };
+    const path = this.config.orgPathFor(modelSlug);
+    if (!path || path.length === 0) return null;
+    let filter: Record<string, any> = { organizationId: org.id };
+    for (let i = path.length - 1; i >= 0; i--) {
+      filter = { [path[i]]: filter };
+    }
+    return filter;
+  }
+
+  /**
+   * Compose an org-scope fragment into a where with AND semantics. Plain
+   * `Object.assign` is kept for the common no-collision case (byte-identical
+   * Prisma args to the legacy behavior); when the where already constrains one
+   * of the org-scope keys (e.g. a client filter on the owning relation), the
+   * two are AND-wrapped so BOTH always apply — the tenant filter can never be
+   * overwritten, and it can never silently drop the caller's constraint.
+   */
+  protected withOrgScope(
+    where: Record<string, any>,
+    orgScope: Record<string, any> | null,
+  ): Record<string, any> {
+    if (!orgScope) return where;
+    const collides = Object.keys(orgScope).some((k) =>
+      Object.prototype.hasOwnProperty.call(where, k),
+    );
+    if (collides) return { AND: [where, orgScope] };
+    return Object.assign(where, orgScope);
   }
 
   async findAll(modelSlug: string, rawQuery: Record<string, any>, ctx: ResourceContext = {}): Promise<FindAllResult> {
@@ -87,7 +122,10 @@ export class ResourceService {
     if (!reg) throw new Error(`Unknown model: ${modelSlug}`);
     const delegate = this.delegate(modelSlug);
     const parsed: ParsedQuery = this.queryBuilder.build(rawQuery, reg, { namedScopes: true });
-    let where = this.mergeWhere(parsed.where, this.orgFilter(modelSlug, ctx.organization));
+    let where = this.withOrgScope(
+      this.mergeWhere(parsed.where),
+      this.orgFilter(modelSlug, ctx.organization),
+    );
     where = this.applyScopes(where, modelSlug, ctx);
 
     // Apply the validated client-selectable named scope (index/trashed only).
@@ -151,8 +189,7 @@ export class ResourceService {
     const delegate = this.delegate(modelSlug);
     const parsed = this.queryBuilder.build(rawQuery, reg);
     let where: Record<string, any> = this.idWhere(modelSlug, id, reg.hasUuid);
-    const orgScope = this.orgFilter(modelSlug, ctx.organization);
-    if (orgScope) Object.assign(where, orgScope);
+    where = this.withOrgScope(where, this.orgFilter(modelSlug, ctx.organization));
     where = this.applyScopes(where, modelSlug, ctx);
     if (reg.softDeletes && !ctx.includeTrashed) where.deletedAt = null;
     return delegate.findFirst({ where, include: parsed.include, select: parsed.select });
@@ -173,9 +210,9 @@ export class ResourceService {
     const reg = this.config.model(modelSlug);
     if (!reg) throw new Error(`Unknown model: ${modelSlug}`);
     const delegate = this.delegate(modelSlug);
-    const where: Record<string, any> = this.idWhere(modelSlug, id, reg.hasUuid);
+    let where: Record<string, any> = this.idWhere(modelSlug, id, reg.hasUuid);
     const orgScope = this.orgFilter(modelSlug, ctx.organization);
-    if (orgScope) Object.assign(where, orgScope);
+    where = this.withOrgScope(where, orgScope);
 
     // Reject attempts to change organizationId silently
     const payload = { ...data };
@@ -203,9 +240,9 @@ export class ResourceService {
     const reg = this.config.model(modelSlug);
     if (!reg) throw new Error(`Unknown model: ${modelSlug}`);
     const delegate = this.delegate(modelSlug);
-    const where: Record<string, any> = this.idWhere(modelSlug, id, reg.hasUuid);
+    let where: Record<string, any> = this.idWhere(modelSlug, id, reg.hasUuid);
     const orgScope = this.orgFilter(modelSlug, ctx.organization);
-    if (orgScope) Object.assign(where, orgScope);
+    where = this.withOrgScope(where, orgScope);
 
     if (reg.softDeletes) {
       const res = await delegate.updateMany({ where, data: { deletedAt: new Date() } });
@@ -231,9 +268,9 @@ export class ResourceService {
     const reg = this.config.model(modelSlug);
     if (!reg?.softDeletes) throw new Error(`Model ${modelSlug} does not support soft deletes`);
     const delegate = this.delegate(modelSlug);
-    const where: Record<string, any> = this.idWhere(modelSlug, id, reg.hasUuid);
+    let where: Record<string, any> = this.idWhere(modelSlug, id, reg.hasUuid);
     const orgScope = this.orgFilter(modelSlug, ctx.organization);
-    if (orgScope) Object.assign(where, orgScope);
+    where = this.withOrgScope(where, orgScope);
     const res = await delegate.updateMany({ where, data: { deletedAt: null } });
     return res.count > 0;
   }
@@ -242,9 +279,9 @@ export class ResourceService {
     const reg = this.config.model(modelSlug);
     if (!reg) throw new Error(`Unknown model: ${modelSlug}`);
     const delegate = this.delegate(modelSlug);
-    const where: Record<string, any> = this.idWhere(modelSlug, id, reg.hasUuid);
+    let where: Record<string, any> = this.idWhere(modelSlug, id, reg.hasUuid);
     const orgScope = this.orgFilter(modelSlug, ctx.organization);
-    if (orgScope) Object.assign(where, orgScope);
+    where = this.withOrgScope(where, orgScope);
     if (orgScope) {
       const res = await delegate.deleteMany({ where });
       return res.count > 0;

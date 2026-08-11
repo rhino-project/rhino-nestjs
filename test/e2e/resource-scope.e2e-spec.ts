@@ -295,4 +295,81 @@ describe('ResourceScopeService (resource-scope resolver)', () => {
     const { service } = buildScope(baseCfg, seed());
     expect(() => service.scopedWhere('ghost', { organization: orgA })).toThrow(/Unknown model: ghost/);
   });
+
+  describe('owner-chain (indirect tenant) models', () => {
+    const ownerCfg = {
+      models: {
+        projects: { model: 'project', policy: RoutePolicy, belongsToOrganization: true },
+        tasks: { model: 'task', policy: RoutePolicy, owner: 'project' },
+        comments: { model: 'comment', policy: RoutePolicy, owner: 'task' },
+      },
+    };
+    const ownerData = () => ({
+      project: [
+        { id: 1, name: 'A', organizationId: 1 },
+        { id: 2, name: 'B', organizationId: 2 },
+      ],
+      task: [
+        { id: 1, title: 'a1', projectId: 1 },
+        { id: 2, title: 'b1', projectId: 2 },
+      ],
+      comment: [
+        { id: 1, body: 'on a1', taskId: 1 },
+        { id: 2, body: 'on b1', taskId: 2 },
+      ],
+    });
+
+    it('scopedWhere builds the nested relation filter from the resolved chain', () => {
+      const { service } = buildScope(ownerCfg, ownerData());
+      expect(service.scopedWhere('tasks', { organization: orgA })).toMatchObject({
+        project: { organizationId: orgA.id },
+      });
+      expect(service.scopedWhere('comments', { organization: orgA })).toMatchObject({
+        task: { project: { organizationId: orgA.id } },
+      });
+    });
+
+    it('fails CLOSED: owner-chain model with no org context throws 403 TENANT_CONTEXT_REQUIRED', () => {
+      const { service } = buildScope(ownerCfg, ownerData());
+      for (const slug of ['tasks', 'comments']) {
+        let thrown: any;
+        try {
+          service.scopedWhere(slug, {});
+        } catch (e) {
+          thrown = e;
+        }
+        expect(thrown).toBeInstanceOf(RhinoException);
+        expect(thrown.getStatus()).toBe(403);
+        expect((thrown.getResponse() as any).code).toBe('TENANT_CONTEXT_REQUIRED');
+      }
+    });
+
+    it('findMany/count through the resolver only return own-org rows for indirect models', async () => {
+      const { service } = buildScope(ownerCfg, ownerData());
+      const aTasks = await service.findMany('tasks', { organization: orgA });
+      const bTasks = await service.findMany('tasks', { organization: orgB });
+      expect(aTasks.map((r: any) => r.id)).toEqual([1]);
+      expect(bTasks.map((r: any) => r.id)).toEqual([2]);
+
+      const aComments = await service.findMany('comments', { organization: orgA });
+      expect(aComments.map((r: any) => r.id)).toEqual([1]);
+      expect(await service.count('comments', { organization: orgB })).toBe(1);
+    });
+
+    it('unresolvable owner chain stays lenient (no org requirement, unscoped) after the boot warning', () => {
+      const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+      try {
+        const { service } = buildScope(
+          { models: { tasks: { model: 'task', policy: RoutePolicy, owner: 'ghost' } } },
+          ownerData(),
+        );
+        // owner never got runtime semantics for this model → previous behavior.
+        expect(() => service.scopedWhere('tasks', {})).not.toThrow();
+        expect(service.scopedWhere('tasks', { organization: orgA })).toEqual({});
+        expect(warnSpy).toHaveBeenCalled();
+      } finally {
+        warnSpy.mockRestore();
+      }
+    });
+  });
 });

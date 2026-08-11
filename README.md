@@ -168,7 +168,7 @@ That's it. You now have a full REST API for posts:
 | 12 | **Field Selection** | `?fields[posts]=id,title,status` to reduce payload. |
 | 13 | **Eager Loading** | `?include=author,comments` with nested dot-notation. |
 | 14 | **Multi-Tenancy** | Organization-based data isolation, auto-set `organizationId`, request scoping. |
-| 15 | **Nested Ownership** | Auto-scopes by `organizationId` on the registered model. |
+| 15 | **Nested Ownership** | Indirect tenant scoping via `owner` chains — e.g. comments → task → project(`belongsToOrganization`) become `{ task: { project: { organizationId } } }` on every CRUD query. |
 | 16 | **Route Groups** | Multiple URL prefixes with different middleware/auth (`tenant`, `public`, custom). Optional per-group `domain` constrains a group to a host (literal or `{organization}.example.com` subdomain). |
 | 17 | **Soft Deletes** | Trash, restore, force-delete endpoints with individual permissions. |
 | 18 | **Audit Trail** | Logs all CRUD events with old/new values, user, IP, and org context. |
@@ -250,7 +250,10 @@ models: {
     exceptActions: ['destroy'],   // disable DELETE endpoint
     middleware: [ThrottleMiddleware],
     actionMiddleware: { store: [VerifiedMiddleware] },
-    owner: 'userId',              // parent FK field for nested ownership chains
+    owner: 'user',                // Prisma relation to the owning model — chains
+                                  // (e.g. comment → task → project) are followed at
+                                  // boot until a belongsToOrganization model, and all
+                                  // CRUD queries are org-scoped through that path
     scopes: [PublishedScope],     // custom Prisma scope classes
   },
 }

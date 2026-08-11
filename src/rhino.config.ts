@@ -15,7 +15,18 @@ import { validateRouteGroups } from './utils/route-group-validator';
  */
 @Injectable()
 export class RhinoConfigService {
-  constructor(@Inject(RHINO_CONFIG) private readonly config: RhinoConfig) {}
+  /**
+   * slug → relation path to the org-scoped root for indirect-tenant models
+   * (`owner` chains), resolved ONCE at boot. `null` = no chain (direct
+   * `belongsToOrganization`, no `owner`, or an unresolvable chain — the latter
+   * warns at boot and keeps the model unscoped, matching the pre-`owner`
+   * behavior instead of bricking the app).
+   */
+  private readonly orgPaths: Map<string, string[] | null>;
+
+  constructor(@Inject(RHINO_CONFIG) private readonly config: RhinoConfig) {
+    this.orgPaths = resolveOwnerOrgPaths(this.models());
+  }
 
   raw(): RhinoConfig {
     return this.config;
@@ -114,6 +125,18 @@ export class RhinoConfigService {
     return this.config.multiTenant?.organizationIdentifierColumn ?? 'id';
   }
 
+  /**
+   * Relation path from an indirect-tenant model (`owner` chain) to its
+   * org-scoped root, e.g. `['task', 'project']` for
+   * comments → task → project(belongsToOrganization). `null` when the model is
+   * directly org-scoped, has no `owner`, or its chain could not be resolved
+   * (warned at boot). Consumers build the nested Prisma filter from this path:
+   * `{ task: { project: { organizationId } } }`.
+   */
+  orgPathFor(slug: string): string[] | null {
+    return this.orgPaths.get(slug) ?? null;
+  }
+
   /** Global default route key (root `routeKey`), `'id'` when unset. */
   globalRouteKey(): string {
     return this.config.routeKey ?? 'id';
@@ -156,6 +179,133 @@ export class RhinoConfigService {
       enforceGroupMembership: this.config.auth?.enforceGroupMembership === true,
     };
   }
+}
+
+/** Max hops when following an `owner` chain to the org-scoped root. */
+const OWNER_CHAIN_MAX_DEPTH = 10;
+
+/** Split a (possibly dot-notated) `owner` value into relation segments. */
+function ownerSegments(owner: unknown): string[] {
+  if (typeof owner !== 'string') return [];
+  return owner
+    .split('.')
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+}
+
+/**
+ * Find the registered model an `owner` segment points at. The segment is the
+ * Prisma RELATION FIELD NAME on the child model (e.g. `Task.owner: 'project'`
+ * → Prisma relation field `project`). Matching order:
+ *
+ *   1. Prisma model name, case-insensitive (`'project'` → model `'Project'`).
+ *   2. Registration slug, case-insensitive, with naive pluralization
+ *      (`project` → `projects`, `category` → `categories`, `box` → `boxes`).
+ *   3. The same two lookups with a trailing `Id`/`_id` stripped, for legacy
+ *      configs that stored the FK column (`'userId'`) instead of the relation.
+ *
+ * Returns the matched slug plus the relation field name to use in the Prisma
+ * path (the raw segment, or the stripped form when an `Id` suffix matched).
+ */
+function findOwnedRegistration(
+  segment: string,
+  models: Record<string, ModelRegistration>,
+): { slug: string; relation: string } | null {
+  const bySlugOrModel = (name: string): string | null => {
+    const lower = name.toLowerCase();
+    for (const [slug, reg] of Object.entries(models)) {
+      if (String(reg.model).toLowerCase() === lower) return slug;
+    }
+    const slugCandidates = [
+      lower,
+      `${lower}s`,
+      lower.endsWith('y') ? `${lower.slice(0, -1)}ies` : null,
+      `${lower}es`,
+    ].filter((c): c is string => c != null);
+    for (const candidate of slugCandidates) {
+      for (const slug of Object.keys(models)) {
+        if (slug.toLowerCase() === candidate) return slug;
+      }
+    }
+    return null;
+  };
+
+  const direct = bySlugOrModel(segment);
+  if (direct) return { slug: direct, relation: segment };
+
+  // Legacy FK-column form: `userId` / `user_id` → relation `user`.
+  const stripped = segment.replace(/_?[iI]d$/, '');
+  if (stripped && stripped !== segment) {
+    const viaFk = bySlugOrModel(stripped);
+    if (viaFk) return { slug: viaFk, relation: stripped };
+  }
+  return null;
+}
+
+/**
+ * Resolve, for every registration with an `owner` chain, the relation path to
+ * its org-scoped root. Runs once at boot (RhinoConfigService construction).
+ *
+ * Failure policy: `owner` was previously inert at runtime, so a stale value
+ * must NOT throw — an unknown owner, a cycle, or a chain that never reaches a
+ * `belongsToOrganization` registration logs a console.warn and leaves the
+ * model unscoped (today's behavior). `belongsToOrganization: true` on the
+ * model itself wins over `owner` (direct scoping, no path, no warning).
+ */
+export function resolveOwnerOrgPaths(
+  models: Record<string, ModelRegistration>,
+): Map<string, string[] | null> {
+  const warn = (slug: string, reason: string) =>
+    // eslint-disable-next-line no-console
+    console.warn(
+      `[Rhino] Model '${slug}': owner chain could not be resolved (${reason}). ` +
+        `The model will NOT be organization-scoped — records are visible across tenants. ` +
+        `Fix the 'owner' value (the Prisma relation field pointing at the owning model) to enable scoping.`,
+    );
+
+  const resolve = (slug: string): string[] | null => {
+    const path: string[] = [];
+    const visited = new Set<string>([slug]);
+    let segments = ownerSegments(models[slug].owner);
+    let currentSlug = slug;
+    for (let depth = 0; depth < OWNER_CHAIN_MAX_DEPTH; depth++) {
+      const segment = segments.shift();
+      if (segment === undefined) {
+        warn(
+          slug,
+          `chain dead-ends at '${currentSlug}', which neither belongs to an organization nor declares an owner`,
+        );
+        return null;
+      }
+      const owned = findOwnedRegistration(segment, models);
+      if (!owned) {
+        warn(slug, `owner '${segment}' does not name a registered model`);
+        return null;
+      }
+      path.push(owned.relation);
+      const ownedReg = models[owned.slug];
+      if (ownedReg.belongsToOrganization) return path;
+      if (visited.has(owned.slug)) {
+        warn(slug, `cycle detected at '${owned.slug}'`);
+        return null;
+      }
+      visited.add(owned.slug);
+      currentSlug = owned.slug;
+      if (segments.length === 0) segments = ownerSegments(ownedReg.owner);
+    }
+    warn(slug, `chain exceeds the maximum depth of ${OWNER_CHAIN_MAX_DEPTH}`);
+    return null;
+  };
+
+  const out = new Map<string, string[] | null>();
+  for (const [slug, reg] of Object.entries(models)) {
+    if (!reg.owner || reg.belongsToOrganization) {
+      out.set(slug, null);
+      continue;
+    }
+    out.set(slug, resolve(slug));
+  }
+  return out;
 }
 
 /**

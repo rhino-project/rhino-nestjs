@@ -24,6 +24,17 @@ export interface ModelRegistration {
   softDeletes?: boolean;
   middleware?: Type<NestMiddleware>[];
   actionMiddleware?: Record<string, Type<NestMiddleware>[]>;
+  /**
+   * Indirect tenant scoping: the Prisma RELATION FIELD on this model pointing
+   * at its owning model (e.g. `Task.owner: 'project'` → Prisma field
+   * `project`). At boot the chain is followed through registrations (owner of
+   * owner, or an explicit dot path like `'task.project'`) until one with
+   * `belongsToOrganization: true`; every CRUD/resolver query is then scoped
+   * with the nested filter, e.g. `{ task: { project: { organizationId } } }`.
+   * `belongsToOrganization: true` on this model wins over `owner`. An
+   * unresolvable value (unknown model, cycle, dead end) logs a boot warning
+   * and leaves the model UNSCOPED (legacy behavior) rather than throwing.
+   */
   owner?: string;
   belongsToOrganization?: boolean;
   hasAuditTrail?: boolean;

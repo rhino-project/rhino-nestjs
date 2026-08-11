@@ -291,6 +291,22 @@ describe('ResourceService', () => {
       expect(job.delete).toHaveBeenCalledWith({ where: { id: 4 } });
     });
 
+    it('org-scoped mutations use the count-based branch for owner-chain models too', async () => {
+      const task = { deleteMany: jest.fn().mockResolvedValue({ count: 1 }) };
+      const svc = makeService(
+        {
+          projects: { model: 'project', belongsToOrganization: true },
+          tasks: { model: 'task', routeKey: 'hashId', owner: 'project' },
+        },
+        { task },
+      );
+      const ok = await svc.delete('tasks', 'h-7', { organization: { id: 7 } });
+      expect(ok).toBe(true);
+      expect(task.deleteMany).toHaveBeenCalledWith({
+        where: { hashId: 'h-7', project: { organizationId: 7 } },
+      });
+    });
+
     it('org-scoped mutations keep the count-based branch with a route-key where', async () => {
       const job = { deleteMany: jest.fn().mockResolvedValue({ count: 1 }) };
       const svc = makeService(
@@ -302,6 +318,102 @@ describe('ResourceService', () => {
       expect(job.deleteMany).toHaveBeenCalledWith({
         where: { hashId: 'h-7', organizationId: 7 },
       });
+    });
+  });
+
+  describe('owner-chain (indirect tenant) org scoping', () => {
+    const taskflowModels = {
+      projects: { model: 'project', belongsToOrganization: true },
+      tasks: { model: 'task', owner: 'project' },
+      comments: { model: 'comment', owner: 'task' },
+    };
+
+    it('findAll on a single-hop owner model filters through the owning relation', async () => {
+      const task = {
+        findMany: jest.fn().mockResolvedValue([]),
+        count: jest.fn().mockResolvedValue(0),
+      };
+      const svc = makeService(taskflowModels, { task });
+      await svc.findAll('tasks', {}, { organization: { id: 7 } });
+      expect(task.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({ project: { organizationId: 7 } }),
+        }),
+      );
+    });
+
+    it('findAll on a two-hop owner model builds the nested relation filter', async () => {
+      const comment = {
+        findMany: jest.fn().mockResolvedValue([]),
+        count: jest.fn().mockResolvedValue(0),
+      };
+      const svc = makeService(taskflowModels, { comment });
+      await svc.findAll('comments', {}, { organization: { id: 7 } });
+      expect(comment.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({ task: { project: { organizationId: 7 } } }),
+        }),
+      );
+    });
+
+    it('findOne merges the id where with the nested org filter', async () => {
+      const task = { findFirst: jest.fn().mockResolvedValue(null) };
+      const svc = makeService(taskflowModels, { task });
+      await svc.findOne('tasks', '3', {}, { organization: { id: 7 } });
+      expect(task.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({ id: 3, project: { organizationId: 7 } }),
+        }),
+      );
+    });
+
+    it('no org context → owner-chain model stays unscoped on the controller path', async () => {
+      const task = {
+        findMany: jest.fn().mockResolvedValue([]),
+        count: jest.fn().mockResolvedValue(0),
+      };
+      const svc = makeService(taskflowModels, { task });
+      await svc.findAll('tasks', {}, {});
+      expect(task.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: {} }),
+      );
+    });
+
+    it('unresolvable owner chain → warns at boot and stays unscoped (legacy behavior)', async () => {
+      const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+      try {
+        const task = {
+          findMany: jest.fn().mockResolvedValue([]),
+          count: jest.fn().mockResolvedValue(0),
+        };
+        const svc = makeService({ tasks: { model: 'task', owner: 'ghost' } }, { task });
+        await svc.findAll('tasks', {}, { organization: { id: 7 } });
+        expect(task.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: {} }));
+        expect(warnSpy).toHaveBeenCalledWith(
+          expect.stringContaining("owner 'ghost' does not name a registered model"),
+        );
+      } finally {
+        warnSpy.mockRestore();
+      }
+    });
+
+    it('withOrgScope AND-wraps when the where already constrains an org-scope key', () => {
+      const svc = makeService(taskflowModels, {});
+      const scoped = (svc as any).withOrgScope(
+        { project: { id: 1 } },
+        { project: { organizationId: 7 } },
+      );
+      // Both constraints survive — the tenant filter can never be overwritten
+      // by (or overwrite) a caller filter on the same relation key.
+      expect(scoped).toEqual({
+        AND: [{ project: { id: 1 } }, { project: { organizationId: 7 } }],
+      });
+      // No collision → plain merge, byte-identical to the legacy where shape.
+      expect((svc as any).withOrgScope({ id: 1 }, { organizationId: 7 })).toEqual({
+        id: 1,
+        organizationId: 7,
+      });
+      expect((svc as any).withOrgScope({ id: 1 }, null)).toEqual({ id: 1 });
     });
   });
 });
