@@ -59,7 +59,7 @@ jobs:
       matrix:
         node: ['20', '22']
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Setup Node ${{ matrix.node }}
         uses: actions/setup-node@v4
@@ -90,7 +90,7 @@ jobs:
       id-token: write # required for OIDC handshake with npm
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Setup Node 22
         uses: actions/setup-node@v4
