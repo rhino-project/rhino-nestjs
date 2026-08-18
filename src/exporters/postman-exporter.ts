@@ -200,6 +200,14 @@ function buildModelFolder(
     folders.push({ name: 'Destroy', item: buildDestroyRequests(basePath) });
   }
 
+  const collectionComputed = Object.keys(reg.collectionComputedAttributes ?? {});
+  if (collectionComputed.length > 0 && !exceptActions.includes('computed')) {
+    folders.push({
+      name: 'Computed Attributes',
+      item: buildComputedRequests(basePath, collectionComputed),
+    });
+  }
+
   if (reg.softDeletes) {
     if (!exceptActions.includes('trashed')) {
       folders.push({ name: 'Trashed', item: buildTrashedRequests(basePath, reg) });
@@ -268,6 +276,14 @@ function buildIndexRequests(basePath: string, slug: string, reg: ModelRegistrati
     );
   }
 
+  for (const attribute of Object.keys(reg.recordComputedAttributes ?? {})) {
+    requests.push(
+      requestItem(`With computed attribute ${attribute}`, 'GET', basePath, {
+        computed_attributes: attribute,
+      }, hdrs),
+    );
+  }
+
   if ((reg.allowedSearch ?? []).length > 0) {
     requests.push(requestItem('Search', 'GET', basePath, { search: 'example' }, hdrs));
   }
@@ -298,6 +314,31 @@ function buildIndexRequests(basePath: string, slug: string, reg: ModelRegistrati
   return requests;
 }
 
+/** Requests for GET {resource}/computed — the collection-level aggregates. */
+function buildComputedRequests(basePath: string, attributes: string[]): object[] {
+  const hdrs = defaultHeaders();
+  const path = `${basePath}/computed`;
+  const requests: object[] = [
+    requestItem('All computed attributes', 'GET', path, {}, hdrs),
+  ];
+
+  for (const attribute of attributes) {
+    requests.push(
+      requestItem(`Computed: ${attribute}`, 'GET', path, { attributes: attribute }, hdrs),
+    );
+  }
+
+  if (attributes.length > 1) {
+    requests.push(
+      requestItem('Computed: multiple attributes', 'GET', path, {
+        attributes: attributes.join(','),
+      }, hdrs),
+    );
+  }
+
+  return requests;
+}
+
 function buildShowRequests(basePath: string, slug: string, reg: ModelRegistration): object[] {
   const path = `${basePath}/{{modelId}}`;
   const hdrs = defaultHeaders();
@@ -315,6 +356,13 @@ function buildShowRequests(basePath: string, slug: string, reg: ModelRegistratio
     requests.push(
       requestItem('Show with fields', 'GET', path, {
         [`fields[${slug}]`]: fields.slice(0, 5).join(','),
+      }, hdrs),
+    );
+  }
+  for (const attribute of Object.keys(reg.recordComputedAttributes ?? {})) {
+    requests.push(
+      requestItem(`Show with computed attribute ${attribute}`, 'GET', path, {
+        computed_attributes: attribute,
       }, hdrs),
     );
   }

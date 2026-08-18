@@ -5,6 +5,27 @@ import type { ResourcePolicy } from '../policies/resource-policy';
 import type { PrismaClientLike } from '../prisma/prisma.service';
 import type { RhinoNamedScope } from '../services/scope.service';
 
+/** Callable behind an opt-in record-level computed attribute. */
+export type RecordComputedAttribute = (record: any, user: any) => any;
+
+/** Context handed to a collection-level computed attribute. */
+export interface CollectionComputedContext {
+  /** Fully scoped Prisma where filter — org scope, model scopes, ?scope=, ?filter[]=, ?search=. */
+  where: Record<string, any>;
+  /** Prisma delegate for this model (e.g. `prisma.user`). */
+  delegate: any;
+  /** The Prisma client, for aggregates that need to reach other models. */
+  prisma: PrismaClientLike;
+  user?: any;
+  organization?: any;
+  modelSlug: string;
+}
+
+/** Callable behind a collection-level computed attribute. */
+export type CollectionComputedAttribute = (
+  ctx: CollectionComputedContext,
+) => any | Promise<any>;
+
 export interface ModelRegistration {
   /** Prisma model name (camelCase or PascalCase — matches the delegate on prisma client) */
   model: string;
@@ -51,6 +72,30 @@ export interface ModelRegistration {
   additionalHiddenColumns?: string[];
   auditExclude?: string[];
   computedAttributes?: (record: any, user: any) => Record<string, any>;
+  /**
+   * OPT-IN record-level computed attributes. Unlike `computedAttributes`,
+   * nothing here is evaluated unless the client names it in
+   * `?computed_attributes=a,b` on index/show/trashed — so expensive per-row
+   * work is only paid for when it is actually wanted. Merged before policy
+   * filtering, so `hiddenAttributesForShow()` / `permittedAttributesForShow()`
+   * still govern them.
+   */
+  recordComputedAttributes?: Record<string, RecordComputedAttribute>;
+  /**
+   * COLLECTION-level computed attributes, served by
+   * `GET /api/{resource}/computed?attributes=a,b`. Each entry is evaluated
+   * ONCE for the whole collection — not once per row — which is what makes
+   * aggregates such as `activeUsersCount` cheap.
+   *
+   * `ctx.where` is the fully scoped Prisma filter (organization scope, model
+   * scopes, `?scope=`, `?filter[]=` and `?search=` already applied), and
+   * `ctx.delegate` is the Prisma delegate for the model, so the usual shape is
+   * `ctx.delegate.count({ where: { ...ctx.where, status: 'active' } })`.
+   *
+   * Declaring at least one attribute here is what makes the `/computed` route
+   * respond for the model.
+   */
+  collectionComputedAttributes?: Record<string, CollectionComputedAttribute>;
   scopes?: Type<any>[];
   /**
    * Client-selectable named scopes for ?scope=<key>. Only declared keys are

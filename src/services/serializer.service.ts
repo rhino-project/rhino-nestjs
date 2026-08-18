@@ -30,6 +30,12 @@ export const BASE_HIDDEN_COLUMNS = [
 export interface SerializeContext {
   user?: any;
   organization?: any;
+  /**
+   * OPT-IN record-level computed attributes selected by the client via
+   * `?computed_attributes=`. Only these names are evaluated; anything else
+   * declared in `recordComputedAttributes` stays untouched.
+   */
+  computedAttributes?: string[];
 }
 
 /**
@@ -68,12 +74,17 @@ export class SerializerService {
     ctx?: SerializeContext | any,
   ): Record<string, any> | null {
     if (!record) return record as any;
-    const { user, organization } = this.normalizeCtx(ctx);
+    const { user, organization, computedAttributes } = this.normalizeCtx(ctx);
     let result = { ...record };
 
     if (reg.computedAttributes) {
       Object.assign(result, reg.computedAttributes(record, user));
     }
+
+    // Merge the OPT-IN record-level computed attributes the client selected.
+    // Nothing is evaluated unless it was asked for by name. Merged BEFORE
+    // policy filtering, so the blacklist/whitelist below still govern them.
+    Object.assign(result, this.resolveRecordComputed(record, reg, computedAttributes, user));
 
     for (const col of BASE_HIDDEN_COLUMNS) {
       delete (result as any)[col];
@@ -113,10 +124,45 @@ export class SerializerService {
     return records.map((r) => this.serializeOne(r, reg, ctx));
   }
 
+  /**
+   * Evaluate the selected opt-in record-level computed attributes.
+   *
+   * Names that are not declared are silently skipped — the controller has
+   * already rejected unknown/forbidden names with a 403, and a direct
+   * serializer caller must not be able to force an arbitrary call.
+   */
+  private resolveRecordComputed(
+    record: Record<string, any>,
+    reg: ModelRegistration,
+    names: string[] | undefined,
+    user: any,
+  ): Record<string, any> {
+    if (!names || names.length === 0) return {};
+    const declared = reg.recordComputedAttributes;
+    if (!declared) return {};
+
+    const out: Record<string, any> = {};
+    for (const name of names) {
+      if (typeof name !== 'string') continue;
+      if (!Object.prototype.hasOwnProperty.call(declared, name)) continue;
+      const entry = declared[name];
+      out[name] = typeof entry === 'function' ? entry(record, user) : entry;
+    }
+    return out;
+  }
+
   private normalizeCtx(ctx: SerializeContext | any): SerializeContext {
-    // New call shape: { user, organization }
-    if (ctx && typeof ctx === 'object' && ('user' in ctx || 'organization' in ctx)) {
-      return { user: (ctx as SerializeContext).user, organization: (ctx as SerializeContext).organization };
+    // New call shape: { user, organization, computedAttributes }
+    if (
+      ctx &&
+      typeof ctx === 'object' &&
+      ('user' in ctx || 'organization' in ctx || 'computedAttributes' in ctx)
+    ) {
+      return {
+        user: (ctx as SerializeContext).user,
+        organization: (ctx as SerializeContext).organization,
+        computedAttributes: (ctx as SerializeContext).computedAttributes,
+      };
     }
     // Legacy call shape: a bare user (or null/undefined)
     return { user: ctx, organization: undefined };

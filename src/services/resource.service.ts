@@ -183,6 +183,71 @@ export class ResourceService {
     return { items };
   }
 
+  /**
+   * Evaluate collection-level computed attributes.
+   *
+   * The where filter handed to each callable has the organization scope, the
+   * model's scopes, `?scope=`, `?filter[]=` and `?search=` already applied — so
+   * the numbers describe exactly the set `findAll` would have returned. Sorting,
+   * sparse fieldsets, includes and pagination are deliberately NOT applied.
+   *
+   * Each callable receives its own shallow copy of the where object so one
+   * attribute's mutations can never leak into the next one's result.
+   */
+  async computeCollectionAttributes(
+    modelSlug: string,
+    rawQuery: Record<string, any>,
+    names: string[],
+    ctx: ResourceContext = {},
+  ): Promise<Record<string, any>> {
+    const reg = this.config.model(modelSlug);
+    if (!reg) throw new Error(`Unknown model: ${modelSlug}`);
+    const delegate = this.delegate(modelSlug);
+    const declared = reg.collectionComputedAttributes ?? {};
+
+    const parsed: ParsedQuery = this.queryBuilder.build(rawQuery, reg, { namedScopes: true });
+    let where = this.withOrgScope(
+      this.mergeWhere(parsed.where),
+      this.orgFilter(modelSlug, ctx.organization),
+    );
+    where = this.applyScopes(where, modelSlug, ctx);
+
+    // Apply the validated client-selectable named scope, exactly as findAll does.
+    // ScopeService is @Optional() — fail CLOSED if it was never wired in.
+    if (parsed.scopeName) {
+      if (!this.scopes) {
+        throw RhinoException.forbidden(`Scope '${parsed.scopeName}' is not allowed`);
+      }
+      where = this.scopes.applyNamed(parsed.scopeName, where, reg, {
+        user: ctx.user,
+        organization: ctx.organization,
+        userRole: resolveUserRoleSlug(ctx.user, ctx.organization?.id),
+      });
+    }
+
+    if (reg.softDeletes && !ctx.includeTrashed) {
+      where.deletedAt = null;
+    }
+
+    const out: Record<string, any> = {};
+    for (const name of names) {
+      const entry = declared[name];
+      if (typeof entry !== 'function') {
+        out[name] = entry;
+        continue;
+      }
+      out[name] = await entry({
+        where: { ...where },
+        delegate,
+        prisma: this.prisma.client,
+        user: ctx.user,
+        organization: ctx.organization,
+        modelSlug,
+      });
+    }
+    return out;
+  }
+
   async findOne(modelSlug: string, id: string | number, rawQuery: Record<string, any>, ctx: ResourceContext = {}) {
     const reg = this.config.model(modelSlug);
     if (!reg) throw new Error(`Unknown model: ${modelSlug}`);

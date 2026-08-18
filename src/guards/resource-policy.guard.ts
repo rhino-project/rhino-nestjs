@@ -62,6 +62,10 @@ export class ResourcePolicyGuard implements CanActivate {
       case 'trashed':
         allowed = policy.viewTrashed(user, org);
         break;
+      case 'computed':
+        // The /computed endpoint is a collection read — same gate as index.
+        allowed = policy.viewAny(user, org);
+        break;
       case 'restore':
         allowed = policy.restore(user, null, org);
         break;
@@ -84,6 +88,7 @@ export class ResourcePolicyGuard implements CanActivate {
     const parts = path.split('?')[0].split('/').filter(Boolean);
     const last = parts[parts.length - 1];
     if (method === 'GET' && last === 'trashed') return 'trashed';
+    if (method === 'GET' && last === 'computed') return 'computed';
     if (method === 'POST' && last === 'restore') return 'restore';
     if (method === 'DELETE' && (last === 'force-delete' || last === 'force')) return 'forceDelete';
     if (method === 'GET') return hasId ? 'show' : 'index';
