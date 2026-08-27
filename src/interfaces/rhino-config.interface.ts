@@ -177,6 +177,13 @@ export interface RouteGroupConfig {
    * store a NULL org. When omitted, a group is treated as a tenant group iff
    * multi-tenancy is enabled. Set `tenant: false` for org-less groups even when
    * multi-tenancy is on.
+   *
+   * `tenant: false` also tells the resource-scope resolver
+   * (`ResourceScopeService`) that queries made in this group legitimately span
+   * every organization: it applies no organization filter and does not throw
+   * TENANT_CONTEXT_REQUIRED for an org-scoped model, leaving access to the
+   * model's own `scopes`. Only an explicit `false` opts out — every other group
+   * keeps failing closed — and an explicit `ctx.organization` still scopes.
    */
   tenant?: boolean;
 }

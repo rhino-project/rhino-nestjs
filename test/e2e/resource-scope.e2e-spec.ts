@@ -145,7 +145,9 @@ describe('ResourceScopeService (resource-scope resolver)', () => {
     expect(thrown.getStatus()).toBe(403);
     const body = thrown.getResponse() as any;
     expect(body.code).toBe('TENANT_CONTEXT_REQUIRED');
-    expect(body.message).toBe("Rhino resource scope for 'routes' requires an organization context");
+    expect(body.message).toContain("Rhino resource scope for 'routes' requires an organization context");
+    // The message names the way out, so the 403 is actionable.
+    expect(body.message).toContain('tenant: false');
   });
 
   it('4. non-org model: scopedWhere returns without requiring org (no throw)', () => {
@@ -369,6 +371,113 @@ describe('ResourceScopeService (resource-scope resolver)', () => {
         expect(warnSpy).toHaveBeenCalled();
       } finally {
         warnSpy.mockRestore();
+      }
+    });
+  });
+
+  // ======================================================================
+  // Non-tenant route groups (`tenant: false`)
+  // ======================================================================
+
+  describe('non-tenant route groups', () => {
+    // A mixed app: the tenant group keeps its boundary, the back-office group
+    // declares it has none.
+    const groupCfg = {
+      models: orgOnlyCfg.models,
+      multiTenant: { organizationIdentifierColumn: 'id' },
+      routeGroups: {
+        tenant: { prefix: '{organization}', models: '*' },
+        admin: { prefix: 'admin', tenant: false, models: '*' },
+      },
+    };
+
+    // Same, but with the user-aware global scope wired in.
+    const scopedGroupCfg = { ...groupCfg, models: baseCfg.models };
+
+    it('spans every organization instead of throwing', async () => {
+      const { service } = buildScope(groupCfg, seed());
+
+      const where = service.scopedWhere('routes', { routeGroup: 'admin' });
+      expect(where.organizationId).toBeUndefined();
+
+      const rows = await service.findMany('routes', { routeGroup: 'admin' });
+      expect(rows.map((r: any) => r.id).sort((a: number, b: number) => a - b)).toEqual([1, 2, 3, 10, 11]);
+      expect(await service.count('routes', { routeGroup: 'admin' })).toBe(5);
+    });
+
+    it('spans every organization for owner-chain (indirect tenant) models too', () => {
+      const { service } = buildScope(
+        {
+          models: {
+            projects: { model: 'project', policy: RoutePolicy, belongsToOrganization: true },
+            tasks: { model: 'task', policy: RoutePolicy, owner: 'project' },
+          },
+          routeGroups: { admin: { prefix: 'admin', tenant: false, models: '*' } },
+        },
+        { project: [], task: [] },
+      );
+
+      expect(() => service.scopedWhere('tasks', { routeGroup: 'admin' })).not.toThrow();
+      expect(service.scopedWhere('tasks', { routeGroup: 'admin' })).toEqual({});
+    });
+
+    it("still applies the model's user-aware global scope", async () => {
+      const { service } = buildScope(scopedGroupCfg, seed());
+
+      const rows = await service.findMany('routes', { user: { id: 1 }, routeGroup: 'admin' });
+      // No org filter (org A and org B), but only user 1's rows.
+      expect(rows.map((r: any) => r.id).sort((a: number, b: number) => a - b)).toEqual([1, 3, 10]);
+    });
+
+    it('still applies a whitelisted named scope', async () => {
+      const { service } = buildScope(scopedGroupCfg, seed());
+
+      const rows = await service.findMany(
+        'routes',
+        { user: { id: 1 }, routeGroup: 'admin' },
+        {},
+        { namedScope: 'active' },
+      );
+      expect(rows.map((r: any) => r.id).sort((a: number, b: number) => a - b)).toEqual([1, 10]);
+    });
+
+    it('still isolates when an explicit organization is passed', async () => {
+      const { service } = buildScope(groupCfg, seed());
+
+      const where = service.scopedWhere('routes', { organization: orgA, routeGroup: 'admin' });
+      expect(where).toMatchObject({ organizationId: orgA.id });
+
+      const rows = await service.findMany('routes', { organization: orgA, routeGroup: 'admin' });
+      expect(rows.every((r: any) => r.organizationId === orgA.id)).toBe(true);
+    });
+
+    it('keeps failing closed in the tenant group of the same app', () => {
+      const { service } = buildScope(groupCfg, seed());
+
+      expect(() => service.scopedWhere('routes', { routeGroup: 'tenant' })).toThrow(RhinoException);
+    });
+
+    it('keeps failing closed for a group declared tenant: true, an unknown group, or no group', () => {
+      const { service } = buildScope(
+        {
+          models: orgOnlyCfg.models,
+          routeGroups: {
+            admin: { prefix: 'admin', tenant: true, models: '*' },
+            public: { prefix: 'public', models: '*' },
+          },
+        },
+        seed(),
+      );
+
+      for (const routeGroup of ['admin', 'nope', 'public', undefined, null, '']) {
+        let thrown: any;
+        try {
+          service.scopedWhere('routes', { routeGroup } as any);
+        } catch (e) {
+          thrown = e;
+        }
+        expect(thrown).toBeInstanceOf(RhinoException);
+        expect((thrown.getResponse() as any).code).toBe('TENANT_CONTEXT_REQUIRED');
       }
     });
   });

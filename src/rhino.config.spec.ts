@@ -187,6 +187,38 @@ describe('RhinoConfigService', () => {
       expect(s.isTenantGroup('whatever')).toBe(true);
     });
 
+    it('groupHasTenantBoundary is strict: only an explicit tenant:false opts out', () => {
+      const s = new RhinoConfigService(
+        normalizeConfig({
+          models: {},
+          multiTenant: { enabled: true, organizationIdentifierColumn: 'slug' },
+          routeGroups: {
+            tenant: { prefix: 't', tenant: true, models: '*' },
+            admin: { prefix: 'a', tenant: false, models: '*' },
+            public: { prefix: 'p', models: '*' },
+          },
+        }),
+      );
+      expect(s.groupHasTenantBoundary('admin')).toBe(false);
+      expect(s.groupHasTenantBoundary('tenant')).toBe(true);
+      // Unlike isTenantGroup, the conventional `public` group is NOT an opt-out:
+      // an unauthenticated route must not silently read every tenant's rows.
+      expect(s.isTenantGroup('public')).toBe(false);
+      expect(s.groupHasTenantBoundary('public')).toBe(true);
+      expect(s.groupHasTenantBoundary('whatever')).toBe(true);
+      expect(s.groupHasTenantBoundary(null)).toBe(true);
+      expect(s.groupHasTenantBoundary(undefined)).toBe(true);
+      expect(s.groupHasTenantBoundary('')).toBe(true);
+    });
+
+    it('groupHasTenantBoundary stays true for a single-tenant config with no groups', () => {
+      const s = new RhinoConfigService(normalizeConfig({ models: {} }));
+      // multiTenantEnabled() is false here, but the resolver still fails closed:
+      // only a declared non-tenant group opts out.
+      expect(s.isTenantGroup('anything')).toBe(false);
+      expect(s.groupHasTenantBoundary('anything')).toBe(true);
+    });
+
     it('isTenantGroup is false when multiTenant disabled and no override', () => {
       const s = new RhinoConfigService(normalizeConfig({ models: {} }));
       expect(s.isTenantGroup('anything')).toBe(false);

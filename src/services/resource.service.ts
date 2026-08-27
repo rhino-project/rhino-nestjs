@@ -17,6 +17,12 @@ export interface FindAllResult {
 export interface ResourceContext {
   user?: any;
   organization?: any;
+  /**
+   * The route group serving this request (`req.__routeGroup`, set by
+   * RouteGroupMiddleware). A group declared `tenant: false` has no tenant
+   * boundary, so ResourceScopeService does not require an organization there.
+   */
+  routeGroup?: string | null;
   orgIdentifierColumn?: string;
   includeTrashed?: boolean;
   onlyTrashed?: boolean;

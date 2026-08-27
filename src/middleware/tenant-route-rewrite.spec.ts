@@ -136,6 +136,64 @@ describe('createTenantRouteRewrite (BP-001)', () => {
       expect(req.url).toBe('/api/nested');
     });
 
+    it('reserves the prefix of a route group declared tenant: false', async () => {
+      const prisma = makePrisma();
+      const config = {
+        ...baseConfig(),
+        routeGroups: {
+          tenant: { prefix: ':organization', models: '*' as const },
+          admin: { prefix: 'admin', tenant: false, models: [] },
+        },
+      } as any;
+      const mw = createTenantRouteRewrite({ prisma, config });
+      const { req, res, next } = makeCtx('/api/admin/dashboard');
+      await mw(req, res, next);
+
+      // Untouched: no org lookup, no rewrite, no strict-mode 404.
+      expect(req.url).toBe('/api/admin/dashboard');
+      expect(req.organization).toBeUndefined();
+      expect(prisma.organization.findFirst).not.toHaveBeenCalled();
+      expect(next).toHaveBeenCalled();
+    });
+
+    it('keeps an explicit reservedSegments list AND the non-tenant prefixes', async () => {
+      const prisma = makePrisma();
+      const config = {
+        ...baseConfig(),
+        routeGroups: { admin: { prefix: 'admin', tenant: false, models: [] } },
+      } as any;
+      const mw = createTenantRouteRewrite({
+        prisma,
+        config,
+        options: { reservedSegments: ['webhooks'] },
+      });
+
+      for (const url of ['/api/webhooks/stripe', '/api/admin/dashboard']) {
+        const { req, res, next } = makeCtx(url);
+        await mw(req, res, next);
+        expect(req.url).toBe(url);
+        expect(next).toHaveBeenCalled();
+      }
+      expect(prisma.organization.findFirst).not.toHaveBeenCalled();
+    });
+
+    it('does not reserve the prefix of a tenant group', async () => {
+      const prisma = makePrisma([{ id: 1, slug: 'acme' }]);
+      const config = {
+        ...baseConfig(),
+        routeGroups: {
+          tenant: { prefix: ':organization', models: '*' as const },
+          driver: { prefix: 'driver', models: [] },
+        },
+      } as any;
+      const mw = createTenantRouteRewrite({ prisma, config });
+      const { req, res, next } = makeCtx('/api/acme/projects');
+      await mw(req, res, next);
+
+      expect(req.url).toBe('/api/projects');
+      expect(req.organization).toMatchObject({ slug: 'acme' });
+    });
+
     it('custom reservedSegments option', async () => {
       const prisma = makePrisma();
       const mw = createTenantRouteRewrite({

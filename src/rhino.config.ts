@@ -114,6 +114,26 @@ export class RhinoConfigService {
     return this.multiTenantEnabled();
   }
 
+  /**
+   * Whether the resource-scope resolver must fail closed for a request served
+   * by route group `name` — i.e. whether that group has a tenant boundary.
+   *
+   * Deliberately STRICTER than {@link isTenantGroup}, which answers a
+   * membership question and treats the conventional `public` group as org-less:
+   * here only a group that explicitly declares `tenant: false` opts out, so a
+   * query that reaches an organization-scoped model in any other group (an
+   * unknown group, an untagged request, a `public` group, or no request at all)
+   * still fails closed instead of silently spanning every tenant.
+   */
+  groupHasTenantBoundary(name: string | null | undefined): boolean {
+    if (!name) return true;
+
+    const group = this.routeGroup(name);
+    if (!group) return true;
+
+    return group.tenant !== false;
+  }
+
   multiTenantEnabled(): boolean {
     const mt = this.config.multiTenant;
     if (!mt) return false;

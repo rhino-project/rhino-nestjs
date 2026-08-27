@@ -57,11 +57,24 @@ export class ResourceScopeService extends ResourceService {
     // silently degrade to an unscoped (cross-tenant) query. Contrast findAll,
     // whose orgFilter simply returns null. Applies equally to indirect-tenant
     // models scoped through a resolved `owner` chain (orgPathFor).
+    //
+    // The one exception is a request served by a route group declared
+    // `tenant: false` — a back office whose queries legitimately span every
+    // organization. There no org filter is applied and nothing is thrown;
+    // access is left to the model's own `scopes`. An explicit
+    // `ctx.organization` is still honored either way — the caller asked for
+    // that tenant.
     const tenantScoped =
       reg.belongsToOrganization || this.config.orgPathFor(modelSlug) != null;
-    if (tenantScoped && !ctx.organization) {
+    if (
+      tenantScoped &&
+      !ctx.organization &&
+      this.config.groupHasTenantBoundary(ctx.routeGroup)
+    ) {
       throw RhinoException.tenantContextRequired(
-        `Rhino resource scope for '${modelSlug}' requires an organization context`,
+        `Rhino resource scope for '${modelSlug}' requires an organization context. ` +
+          `Pass ctx.organization, or declare the route group serving this request ` +
+          `\`tenant: false\` if it legitimately spans every organization.`,
       );
     }
 

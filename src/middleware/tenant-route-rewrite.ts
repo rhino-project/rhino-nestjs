@@ -11,7 +11,8 @@ export interface TenantRouteRewriteOptions {
   /**
    * Path segments to treat as non-tenant even when they match an org slug
    * (they sit at the api root). Defaults cover the library's built-in
-   * public/auth endpoints plus `nested`.
+   * public/auth endpoints plus `nested`. The prefixes of every route group
+   * declared `tenant: false` are always added to this list.
    */
   reservedSegments?: string[];
   /**
@@ -83,7 +84,17 @@ export function createTenantRouteRewrite(args: {
     enforceMembership = true,
   } = args.options ?? {};
 
-  const reserved = new Set(reservedSegments);
+  // Non-tenant route groups (`tenant: false`) live at the API root, alongside
+  // auth/invitations/nested — their first path segment is never an organization
+  // slug, so it must pass through unrewritten. Merged in rather than replacing
+  // an explicit `reservedSegments`, so declaring a back-office group is enough
+  // to make its routes reachable.
+  const nonTenantPrefixes = Object.values(args.config.routeGroups ?? {})
+    .filter((group: any) => group?.tenant === false)
+    .map((group: any) => String(group?.prefix ?? '').replace(/^\/+/, '').split('/')[0])
+    .filter((segment) => segment !== '' && !segment.startsWith(':') && !segment.startsWith('{'));
+
+  const reserved = new Set([...reservedSegments, ...nonTenantPrefixes]);
   const orgModel = args.config.multiTenant?.organizationModel ?? 'organization';
   const userOrgModel = args.config.multiTenant?.userOrganizationModel ?? 'userRole';
   const idColumn = args.config.multiTenant?.organizationIdentifierColumn ?? 'slug';
