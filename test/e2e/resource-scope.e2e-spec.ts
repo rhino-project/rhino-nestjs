@@ -451,6 +451,26 @@ describe('ResourceScopeService (resource-scope resolver)', () => {
       expect(rows.every((r: any) => r.organizationId === orgA.id)).toBe(true);
     });
 
+    it('works with no request at all — a job names the group in its ctx', async () => {
+      const { service } = buildScope(groupCfg, seed());
+
+      // There is no request here: the context is hand-built, exactly as a
+      // queued job or a script would build it. Naming the non-tenant group is
+      // what lets the query span every organization.
+      const ctx = { user: { id: 1 }, routeGroup: 'admin' };
+
+      expect(await service.count('routes', ctx)).toBe(5);
+      expect(service.scopedWhere('routes', ctx).organizationId).toBeUndefined();
+    });
+
+    it('a job naming a tenant group still fails closed', () => {
+      const { service } = buildScope(groupCfg, seed());
+
+      expect(() => service.scopedWhere('routes', { user: { id: 1 }, routeGroup: 'tenant' })).toThrow(
+        RhinoException,
+      );
+    });
+
     it('keeps failing closed in the tenant group of the same app', () => {
       const { service } = buildScope(groupCfg, seed());
 
