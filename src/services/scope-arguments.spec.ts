@@ -144,6 +144,65 @@ describe('Named scope arguments', () => {
     });
   });
 
+  describe('the scope cap', () => {
+    const withCap = (cap: any) =>
+      new QueryBuilderService({ maxScopesPerRequest: () => cap } as any);
+
+    it('is configurable', () => {
+      const qb2 = withCap(2);
+      const ok = qb2.build({ scope: { archived: '', since: '2026-01-01' } }, reg, {
+        namedScopes: true,
+      });
+      expect(ok.scopes).toHaveLength(2);
+
+      expect(() =>
+        qb2.build({ scope: { archived: '', since: '2026-01-01', publishedIs: 'true' } }, reg, {
+          namedScopes: true,
+        }),
+      ).toThrow('Too many scopes requested');
+    });
+
+    it('defaults to three when no config is injected', () => {
+      const three = qb.build(
+        { scope: { archived: '', since: '2026-01-01', publishedIs: 'true' } },
+        reg,
+        { namedScopes: true },
+      );
+      expect(three.scopes).toHaveLength(3);
+    });
+  });
+
+  describe('dependency injection', () => {
+    // A circular import between rhino.config and query-builder.service once left
+    // RhinoConfigService undefined while the decorators ran, so Nest injected
+    // nothing and every app silently kept the default cap.
+    // ts-jest resolves the cycle that the compiled CommonJS output does not, so
+    // this guards the actual failure mode: the import itself.
+    it('keeps rhino.config from importing the query builder', async () => {
+      const { readFileSync } = await import('fs');
+      const source = readFileSync(`${__dirname}/../rhino.config.ts`, 'utf8');
+      expect(source).not.toMatch(/from '\.\/services\/query-builder\.service'/);
+    });
+
+    it('receives the config service through the module, so the cap is honored', async () => {
+      const { Test } = await import('@nestjs/testing');
+      const { RhinoModule } = await import('../rhino.module');
+
+      const moduleRef = await Test.createTestingModule({
+        imports: [
+          RhinoModule.forRoot(
+            { models: { posts: { model: 'post' } }, maxScopesPerRequest: 5 } as any,
+            { registerControllers: false },
+          ),
+        ],
+      }).compile();
+
+      const injected = moduleRef.get(QueryBuilderService);
+      expect((injected as any).config).toBeDefined();
+      expect((injected as any).maxScopesPerRequest()).toBe(5);
+    });
+  });
+
   describe('permittedScopes', () => {
     const gated: ModelRegistration = { ...reg, policy: RestrictivePolicy as any };
 

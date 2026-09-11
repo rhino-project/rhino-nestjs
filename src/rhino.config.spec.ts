@@ -63,6 +63,25 @@ describe('RhinoConfigService', () => {
     }
   });
 
+  describe('maxScopesPerRequest', () => {
+    const service = (cfg: any) =>
+      new RhinoConfigService(normalizeConfig({ models: { posts: { model: 'post' } }, ...cfg }));
+
+    it('defaults to three', () => {
+      expect(service({}).maxScopesPerRequest()).toBe(3);
+    });
+
+    it('honors a configured value', () => {
+      expect(service({ maxScopesPerRequest: 5 }).maxScopesPerRequest()).toBe(5);
+    });
+
+    it('falls back to the default for a value that would lock scopes out', () => {
+      expect(service({ maxScopesPerRequest: 0 }).maxScopesPerRequest()).toBe(3);
+      expect(service({ maxScopesPerRequest: -1 }).maxScopesPerRequest()).toBe(3);
+      expect(service({ maxScopesPerRequest: 'lots' as any }).maxScopesPerRequest()).toBe(3);
+    });
+  });
+
   describe('route key', () => {
     it('routeKeyFor defaults to id when nothing is configured', () => {
       const s = new RhinoConfigService(

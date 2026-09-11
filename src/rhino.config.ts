@@ -8,6 +8,7 @@ import type {
 } from './interfaces/rhino-config.interface';
 import type { Type } from '@nestjs/common';
 import { validateRouteGroups } from './utils/route-group-validator';
+import { DEFAULT_MAX_SCOPES_PER_REQUEST } from './constants/defaults';
 
 /**
  * Injectable accessor for the consuming app's Rhino configuration.
@@ -160,6 +161,18 @@ export class RhinoConfigService {
   /** Global default route key (root `routeKey`), `'id'` when unset. */
   globalRouteKey(): string {
     return this.config.routeKey ?? 'id';
+  }
+
+  /**
+   * How many named scopes one request may combine (root `maxScopesPerRequest`),
+   * 3 when unset. A non-positive or non-numeric value falls back to the default
+   * rather than locking every scope out of every request.
+   */
+  maxScopesPerRequest(): number {
+    const configured = this.config.maxScopesPerRequest;
+    return typeof configured === 'number' && Number.isFinite(configured) && configured >= 1
+      ? Math.floor(configured)
+      : DEFAULT_MAX_SCOPES_PER_REQUEST;
   }
 
   /**

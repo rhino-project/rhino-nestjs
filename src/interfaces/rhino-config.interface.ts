@@ -262,6 +262,15 @@ export interface RhinoConfig {
    * used (byte-identical to previous behavior).
    */
   routeKey?: string;
+  /**
+   * How many client-selectable named scopes one request may combine with the
+   * bracket form (`?scope[a]=&scope[b][x]=1`). Each scope is an arbitrary
+   * where-fragment that may add relation filters of its own, so the number is
+   * capped: a request over the cap is refused with 403 `Too many scopes
+   * requested`. Defaults to 3 — a base scope, a window, and one more predicate.
+   * A non-positive value falls back to the default.
+   */
+  maxScopesPerRequest?: number;
   routeGroups?: Record<string, RouteGroupConfig>;
   multiTenant?: MultiTenantConfig;
   nested?: NestedConfig;

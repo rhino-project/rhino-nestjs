@@ -2,6 +2,7 @@ import { BadRequestException, Injectable, Optional } from '@nestjs/common';
 import type { ModelRegistration } from '../interfaces/rhino-config.interface';
 import { RhinoConfigService } from '../rhino.config';
 import { RhinoException } from '../errors/rhino-exception';
+import { DEFAULT_MAX_SCOPES_PER_REQUEST } from '../constants/defaults';
 
 export interface ParsedQuery {
   where: Record<string, any>;
@@ -25,8 +26,12 @@ export interface QueryContext {
   organization?: any;
 }
 
-/** How many named scopes one request may combine. */
-export const MAX_SCOPES_PER_REQUEST = 3;
+/**
+ * Fallback for how many named scopes one request may combine, used when no
+ * config is injected. Apps set the root `maxScopesPerRequest` key. Defined in
+ * constants/defaults so this module and `rhino.config` do not import each other.
+ */
+export { DEFAULT_MAX_SCOPES_PER_REQUEST };
 
 /**
  * Parses query string parameters into Prisma-compatible `findMany` args.
@@ -113,7 +118,7 @@ export class QueryBuilderService {
       requested = Object.entries(raw as Record<string, any>);
     }
 
-    if (requested.length > MAX_SCOPES_PER_REQUEST) {
+    if (requested.length > this.maxScopesPerRequest()) {
       throw RhinoException.forbidden('Too many scopes requested');
     }
 
@@ -129,6 +134,11 @@ export class QueryBuilderService {
       }
       return { name, args: this.bindScopeArguments(name, reg, rawArgs) };
     });
+  }
+
+  /** How many named scopes this app allows in one request. */
+  private maxScopesPerRequest(): number {
+    return this.config?.maxScopesPerRequest?.() ?? DEFAULT_MAX_SCOPES_PER_REQUEST;
   }
 
   /** Own-key check: a prototype key such as `constructor` is never a scope. */
