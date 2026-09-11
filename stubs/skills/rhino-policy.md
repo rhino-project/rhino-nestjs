@@ -12,6 +12,7 @@ Rhino policies check `{slug}.{action}` permissions. The base `ResourcePolicy` cl
 1. Restrict which fields users can **write** (`permittedAttributesForCreate` / `permittedAttributesForUpdate`)
 2. Restrict which fields users can **read** (`permittedAttributesForShow` / `hiddenAttributesForShow`)
 3. Add custom authorization logic beyond permission checks (e.g., "only the author can edit")
+4. Restrict which named scopes a user may select with `?scope=` (`permittedScopes`)
 
 Read the following before writing any code:
 - `src/policies/resource-policy.ts` — the base class
@@ -166,7 +167,8 @@ npm test -- --testPathPattern=post.policy
 
 - Do not forget to call `super.update(...)` etc. in overridden action methods — skipping it bypasses the permission check entirely.
 - `hasRole(user, 'admin')` checks the role in the current organization context stored on the user object. If organization context is not set, it returns false.
-- Return `['*']` (not `[]`) from `permittedAttributesForShow` when all fields should be visible — `[]` means nothing is visible.
+- Return `['*']` (not `[]`) from `permittedAttributesForShow` when all fields should be visible — `[]` means nothing is visible. The same goes for `permittedScopes`.
+- A field hidden by `hiddenAttributesForShow` is also refused as a `?filter[]` or `?sort` and skipped by `?search=`, so hiding a column no longer leaves it usable as a query predicate.
 - The `resourceSlug` on the policy must match the key in `RhinoModule.forRoot({ models: { [slug]: ... } })`.
 
 ## Permission Reference

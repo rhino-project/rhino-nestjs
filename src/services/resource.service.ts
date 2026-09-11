@@ -127,23 +127,28 @@ export class ResourceService {
     const reg = this.config.model(modelSlug);
     if (!reg) throw new Error(`Unknown model: ${modelSlug}`);
     const delegate = this.delegate(modelSlug);
-    const parsed: ParsedQuery = this.queryBuilder.build(rawQuery, reg, { namedScopes: true });
+    const parsed: ParsedQuery = this.queryBuilder.build(rawQuery, reg, {
+      namedScopes: true,
+      ctx: { user: ctx.user, organization: ctx.organization },
+    });
     let where = this.withOrgScope(
       this.mergeWhere(parsed.where),
       this.orgFilter(modelSlug, ctx.organization),
     );
     where = this.applyScopes(where, modelSlug, ctx);
 
-    // Apply the validated client-selectable named scope (index/trashed only).
+    // Apply the validated client-selectable named scopes, in the order the URL
+    // listed them (index/trashed only).
     // ScopeService is @Optional() — fail CLOSED if it was never wired in.
-    if (parsed.scopeName) {
+    for (const requested of parsed.scopes ?? []) {
       if (!this.scopes) {
-        throw RhinoException.forbidden(`Scope '${parsed.scopeName}' is not allowed`);
+        throw RhinoException.forbidden(`Scope '${requested.name}' is not allowed`);
       }
-      where = this.scopes.applyNamed(parsed.scopeName, where, reg, {
+      where = this.scopes.applyNamed(requested.name, where, reg, {
         user: ctx.user,
         organization: ctx.organization,
         userRole: resolveUserRoleSlug(ctx.user, ctx.organization?.id),
+        args: requested.args,
       });
     }
 
@@ -211,23 +216,27 @@ export class ResourceService {
     const delegate = this.delegate(modelSlug);
     const declared = reg.collectionComputedAttributes ?? {};
 
-    const parsed: ParsedQuery = this.queryBuilder.build(rawQuery, reg, { namedScopes: true });
+    const parsed: ParsedQuery = this.queryBuilder.build(rawQuery, reg, {
+      namedScopes: true,
+      ctx: { user: ctx.user, organization: ctx.organization },
+    });
     let where = this.withOrgScope(
       this.mergeWhere(parsed.where),
       this.orgFilter(modelSlug, ctx.organization),
     );
     where = this.applyScopes(where, modelSlug, ctx);
 
-    // Apply the validated client-selectable named scope, exactly as findAll does.
+    // Apply the validated client-selectable named scopes, exactly as findAll does.
     // ScopeService is @Optional() — fail CLOSED if it was never wired in.
-    if (parsed.scopeName) {
+    for (const requested of parsed.scopes ?? []) {
       if (!this.scopes) {
-        throw RhinoException.forbidden(`Scope '${parsed.scopeName}' is not allowed`);
+        throw RhinoException.forbidden(`Scope '${requested.name}' is not allowed`);
       }
-      where = this.scopes.applyNamed(parsed.scopeName, where, reg, {
+      where = this.scopes.applyNamed(requested.name, where, reg, {
         user: ctx.user,
         organization: ctx.organization,
         userRole: resolveUserRoleSlug(ctx.user, ctx.organization?.id),
+        args: requested.args,
       });
     }
 

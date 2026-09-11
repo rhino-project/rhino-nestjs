@@ -50,6 +50,19 @@ export class ResourcePolicy {
   hiddenAttributesForShow(_user: any, _org?: any): string[] {
     return [];
   }
+  // ---------------- Scope permissions ----------------
+  /**
+   * Named scopes this user may select with `?scope=`. Return `['*']` to allow
+   * every scope the model declares in `namedScopes` (default). The model's
+   * declaration still applies: this can only narrow it.
+   *
+   * The model's `defaultScope` is applied by the server when the client sends
+   * no scope at all, so it is not subject to this list. Requesting it by name is.
+   */
+  permittedScopes(_user: any, _org?: any): string[] {
+    return ['*'];
+  }
+
   permittedAttributesForCreate(_user: any, _org?: any): string[] {
     return ['*'];
   }

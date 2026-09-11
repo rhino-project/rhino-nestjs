@@ -6,6 +6,12 @@ export interface ScopeContext {
   user?: any;
   organization?: any;
   userRole?: string | null;
+  /**
+   * Arguments the client sent for a named scope, bound by name to the
+   * parameters the scope class declares in `static params`. Empty for a scope
+   * that declares none.
+   */
+  args?: Record<string, any>;
 }
 
 export interface RhinoScope {
@@ -20,7 +26,19 @@ export interface RhinoScope {
  * to drop the org / filter / search / soft-delete constraints.
  */
 export interface RhinoNamedScope {
-  /** Return a Prisma where-fragment; Rhino ANDs it with the existing where. */
+  /**
+   * Return a Prisma where-fragment; Rhino ANDs it with the existing where.
+   * Client-supplied arguments arrive as `context.args`, keyed by the parameter
+   * names the class declares:
+   *
+   *   class WindowScope implements RhinoNamedScope {
+   *     static params = ['from', 'to'];
+   *     static optionalParams = ['to'];
+   *     apply(ctx: ScopeContext) {
+   *       return { createdAt: { gte: ctx.args!.from, lte: ctx.args!.to } };
+   *     }
+   *   }
+   */
   apply(context: ScopeContext): Record<string, any>;
 }
 

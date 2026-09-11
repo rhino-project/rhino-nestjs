@@ -73,12 +73,12 @@ This library provides the following features. When modifying or extending any of
 | 2 | **Authentication** | `auth.controller.ts`, `auth.service.ts`, `jwt-auth.guard.ts` |
 | 3 | **Authorization & Policies** | `resource-policy.guard.ts`, `policies/resource-policy.ts` |
 | 4 | **Role-Based Access Control** | `utils/permission-matcher.ts`, `resource-policy.guard.ts` |
-| 5 | **Attribute-Level Permissions** | `serializer.service.ts`, `validation.service.ts`, `resource-policy.ts` |
+| 5 | **Attribute-Level Permissions** (the read gate also applies to `?filter[]`, `?sort` and `?search`) | `serializer.service.ts`, `validation.service.ts`, `resource-policy.ts`, `query-builder.service.ts` (`attributeQueryable`) |
 | 6 | **Validation** | `validation.service.ts` (Zod schemas, role-keyed) |
 | 7 | **Cross-Tenant FK Validation** | `validation.service.ts` (strips `organizationId` from input) |
-| 8 | **Filtering** | `query-builder.service.ts` (`buildWhere`) |
-| 9 | **Sorting** | `query-builder.service.ts` (`buildOrderBy`) |
-| 10 | **Full-Text Search** | `query-builder.service.ts` (`buildWhere` with `OR` fragments) |
+| 8 | **Filtering** (403 when the policy hides the attribute) | `query-builder.service.ts` (`buildWhere`) |
+| 9 | **Sorting** (403 when the policy hides the attribute; `defaultSort` exempt) | `query-builder.service.ts` (`buildOrderBy`) |
+| 10 | **Full-Text Search** (skips hidden columns, matches nothing when all are hidden) | `query-builder.service.ts` (`buildWhere` with `OR` fragments) |
 | 11 | **Pagination** | `resource.service.ts`, `response.interceptor.ts` |
 | 12 | **Field Selection** | `query-builder.service.ts` (`buildSelect`) |
 | 13 | **Eager Loading** | `query-builder.service.ts` (`buildInclude`) |
@@ -99,7 +99,7 @@ This library provides the following features. When modifying or extending any of
 | 28 | **Blueprint System** | `blueprint/blueprint-parser.ts`, `blueprint/generators/` |
 | 29 | **Group Membership** (opt-in via `auth.enforceGroupMembership`) | `services/membership.service.ts`, `guards/group-membership.guard.ts`, `utils/permission-matcher.ts` |
 | 30 | **Group-Aware Auth & Lifecycle Hooks** | `controllers/auth.controller.ts`, `services/auth-hooks.service.ts`, `rhino-config.interface.ts` (`AuthLifecycleHooks`, per-group `auth`/`hooks`), `services/invitation.service.ts` (`route_group`) |
-| 31 | **Named Scopes** (`?scope=<key>`) | `services/scope.service.ts` (`RhinoNamedScope`, `applyNamed` — own-property + instance guard, AND-wrap), `services/query-builder.service.ts` (`build(..., { namedScopes })` whitelist + non-string reject), `services/resource.service.ts` (`findAll` applies it, fails closed when `ScopeService` absent), `rhino-config.interface.ts` (`namedScopes`/`defaultScope`), `rhino.config.ts` (`normalizeConfig` boot validation) |
+| 31 | **Named Scopes** (`?scope=<key>`, or `?scope[key][param]=value` with `static params` on the scope class, up to 3 per request; gated by `namedScopes` and the policy's `permittedScopes()`) | `services/scope.service.ts` (`RhinoNamedScope`, `applyNamed` — own-property + instance guard, AND-wrap, `ctx.args`), `services/query-builder.service.ts` (`buildNamedScopes` — whitelist, policy, argument binding), `services/resource.service.ts` (`findAll` applies them in URL order, fails closed when `ScopeService` absent), `rhino-config.interface.ts` (`namedScopes`/`defaultScope`), `rhino.config.ts` (`normalizeConfig` boot validation) |
 | 32 | **Configurable Route Key** (`routeKey`) | `rhino-config.interface.ts` (`ModelRegistration.routeKey` + root `routeKey`), `rhino.config.ts` (`routeKeyFor()`/`globalRouteKey()`, `normalizeConfig` non-empty-string boot validation), `services/resource.service.ts` (`idWhere` — member-endpoint lookups by the resolved key; param stays a STRING when key ≠ `id`; non-org mutate paths resolve via `findFirst` then mutate by PK because a custom key isn't unique for Prisma's typed `update`/`delete` where), `services/serializer.service.ts` (whitelist always keeps the route-key column), `services/query-builder.service.ts` (`buildSelect` seeds it), `controllers/global.controller.ts` (restore audit logs the real PK, not the raw param), `decorators/index.ts` (`@RouteKey`), `utils/model-builder.ts`, `blueprint/blueprint-parser.ts` (`route_key`), `blueprint/generators/resource-definition-generator.ts`, `blueprint/generators/test-generator.ts` |
 
 ### Group-auth hooks & token revocation (feature 30) — operator notes

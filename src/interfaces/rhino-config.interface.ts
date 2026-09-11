@@ -101,6 +101,23 @@ export interface ModelRegistration {
    * Client-selectable named scopes for ?scope=<key>. Only declared keys are
    * callable. Each scope returns a Prisma where-fragment that Rhino ANDs into
    * the query for index/trashed only.
+   *
+   * A scope may declare parameters the client fills in, as statics on the class:
+   *
+   *   class WindowScope implements RhinoNamedScope {
+   *     static params = ['from', 'to'];
+   *     static optionalParams = ['to'];
+   *     apply(ctx: ScopeContext) { ... ctx.args.from ... }
+   *   }
+   *
+   * Queries:
+   *   GET /api/routes?scope=archived
+   *   GET /api/routes?scope[since]=2026-01-01
+   *   GET /api/routes?scope[window][from]=a&scope[window][to]=b
+   *
+   * Up to three scopes may be combined in the bracket form, applied in the
+   * order the URL lists them. A scope that declares no parameters never
+   * receives client input: sending any is a 403.
    */
   namedScopes?: Record<string, Type<RhinoNamedScope>>;
   /** Key of namedScopes applied when no ?scope param is sent. */
