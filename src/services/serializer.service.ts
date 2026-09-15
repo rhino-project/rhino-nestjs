@@ -1,6 +1,10 @@
 import { Injectable, Optional } from '@nestjs/common';
 import type { ModelRegistration } from '../interfaces/rhino-config.interface';
 import { RhinoConfigService } from '../rhino.config';
+import {
+  computedAttributeRequiresArguments,
+  lookupComputedAttribute,
+} from '../utils/computed-attribute-spec';
 
 export const BASE_HIDDEN_COLUMNS = [
   'password',
@@ -36,6 +40,13 @@ export interface SerializeContext {
    * declared in `recordComputedAttributes` stays untouched.
    */
   computedAttributes?: string[];
+  /**
+   * Bound arguments per computed-attribute name, from the bracket query form.
+   * A SEPARATE channel from `computedAttributes`, so an existing caller that
+   * passes only names keeps working: an attribute with required parameters and
+   * no entry here is skipped rather than called with none.
+   */
+  computedAttributeArgs?: Record<string, Record<string, any>>;
 }
 
 /**
@@ -74,7 +85,8 @@ export class SerializerService {
     ctx?: SerializeContext | any,
   ): Record<string, any> | null {
     if (!record) return record as any;
-    const { user, organization, computedAttributes } = this.normalizeCtx(ctx);
+    const { user, organization, computedAttributes, computedAttributeArgs } =
+      this.normalizeCtx(ctx);
     let result = { ...record };
 
     if (reg.computedAttributes) {
@@ -84,7 +96,10 @@ export class SerializerService {
     // Merge the OPT-IN record-level computed attributes the client selected.
     // Nothing is evaluated unless it was asked for by name. Merged BEFORE
     // policy filtering, so the blacklist/whitelist below still govern them.
-    Object.assign(result, this.resolveRecordComputed(record, reg, computedAttributes, user));
+    Object.assign(
+      result,
+      this.resolveRecordComputed(record, reg, computedAttributes, user, computedAttributeArgs),
+    );
 
     for (const col of BASE_HIDDEN_COLUMNS) {
       delete (result as any)[col];
@@ -130,12 +145,17 @@ export class SerializerService {
    * Names that are not declared are silently skipped — the controller has
    * already rejected unknown/forbidden names with a 403, and a direct
    * serializer caller must not be able to force an arbitrary call.
+   *
+   * An attribute that declares a required parameter is likewise skipped when
+   * `args` carries no entry for it, so an existing caller that passes only
+   * names gets a missing key rather than a callable invoked with nothing.
    */
   private resolveRecordComputed(
     record: Record<string, any>,
     reg: ModelRegistration,
     names: string[] | undefined,
     user: any,
+    args?: Record<string, Record<string, any>>,
   ): Record<string, any> {
     if (!names || names.length === 0) return {};
     const declared = reg.recordComputedAttributes;
@@ -143,25 +163,35 @@ export class SerializerService {
 
     const out: Record<string, any> = {};
     for (const name of names) {
-      if (typeof name !== 'string') continue;
-      if (!Object.prototype.hasOwnProperty.call(declared, name)) continue;
-      const entry = declared[name];
-      out[name] = typeof entry === 'function' ? entry(record, user) : entry;
+      // Own-key lookup so a prototype key can never resolve to a member.
+      const spec = lookupComputedAttribute(declared, name);
+      if (!spec) continue;
+
+      const hasArgs = !!args && Object.prototype.hasOwnProperty.call(args, name);
+      if (!hasArgs && computedAttributeRequiresArguments(spec)) continue;
+
+      const entry = spec.using;
+      out[name] =
+        typeof entry === 'function' ? entry(record, user, hasArgs ? args![name] : {}) : entry;
     }
     return out;
   }
 
   private normalizeCtx(ctx: SerializeContext | any): SerializeContext {
-    // New call shape: { user, organization, computedAttributes }
+    // New call shape: { user, organization, computedAttributes, computedAttributeArgs }
     if (
       ctx &&
       typeof ctx === 'object' &&
-      ('user' in ctx || 'organization' in ctx || 'computedAttributes' in ctx)
+      ('user' in ctx ||
+        'organization' in ctx ||
+        'computedAttributes' in ctx ||
+        'computedAttributeArgs' in ctx)
     ) {
       return {
         user: (ctx as SerializeContext).user,
         organization: (ctx as SerializeContext).organization,
         computedAttributes: (ctx as SerializeContext).computedAttributes,
+        computedAttributeArgs: (ctx as SerializeContext).computedAttributeArgs,
       };
     }
     // Legacy call shape: a bare user (or null/undefined)

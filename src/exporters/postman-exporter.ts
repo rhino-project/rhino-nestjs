@@ -1,4 +1,8 @@
 import type { RhinoConfig, ModelRegistration } from '../interfaces/rhino-config.interface';
+import {
+  computedAttributeRequiresArguments,
+  lookupComputedAttribute,
+} from '../utils/computed-attribute-spec';
 
 export interface PostmanExporterOptions {
   baseUrl: string;
@@ -204,7 +208,7 @@ function buildModelFolder(
   if (collectionComputed.length > 0 && !exceptActions.includes('computed')) {
     folders.push({
       name: 'Computed Attributes',
-      item: buildComputedRequests(basePath, collectionComputed),
+      item: buildComputedRequests(basePath, collectionComputed, reg.collectionComputedAttributes),
     });
   }
 
@@ -278,9 +282,9 @@ function buildIndexRequests(basePath: string, slug: string, reg: ModelRegistrati
 
   for (const attribute of Object.keys(reg.recordComputedAttributes ?? {})) {
     requests.push(
-      requestItem(`With computed attribute ${attribute}`, 'GET', basePath, {
-        computed_attributes: attribute,
-      }, hdrs),
+      requestItem(`With computed attribute ${attribute}`, 'GET', basePath,
+        computedAttributeQuery('computed_attributes', attribute, reg.recordComputedAttributes),
+        hdrs),
     );
   }
 
@@ -314,24 +318,74 @@ function buildIndexRequests(basePath: string, slug: string, reg: ModelRegistrati
   return requests;
 }
 
+/**
+ * The query parameters that select one computed attribute, in whichever form
+ * its declaration requires: the plain list when it takes no parameters, the
+ * bracket form when it does. The callables never leave the server — only the
+ * names and the declared parameter names do.
+ */
+function computedAttributeQuery(
+  key: string,
+  attribute: string,
+  declared: Record<string, any> | undefined,
+): Record<string, string> {
+  const spec = lookupComputedAttribute(declared, attribute);
+  const params = spec?.params ?? [];
+
+  if (params.length === 0) return { [key]: attribute };
+  if (params.length === 1) return { [`${key}[${attribute}]`]: 'example' };
+
+  const query: Record<string, string> = {};
+  for (const param of params) {
+    query[`${key}[${attribute}][${param}]`] = 'example';
+  }
+  return query;
+}
+
+/**
+ * The attribute names that can be requested without arguments — the only ones a
+ * combined "give me everything" request may name, since a required parameter
+ * left out is a guaranteed 403.
+ */
+function argumentFreeComputedAttributes(declared: Record<string, any> | undefined): string[] {
+  return Object.keys(declared ?? {}).filter((name) => {
+    const spec = lookupComputedAttribute(declared, name);
+    return !!spec && !computedAttributeRequiresArguments(spec);
+  });
+}
+
 /** Requests for GET {resource}/computed — the collection-level aggregates. */
-function buildComputedRequests(basePath: string, attributes: string[]): object[] {
+function buildComputedRequests(
+  basePath: string,
+  attributes: string[],
+  declared: Record<string, any> | undefined,
+): object[] {
   const hdrs = defaultHeaders();
   const path = `${basePath}/computed`;
+  // A bare /computed skips required-parameter attributes server-side, so this
+  // stays a valid request.
   const requests: object[] = [
     requestItem('All computed attributes', 'GET', path, {}, hdrs),
   ];
 
   for (const attribute of attributes) {
     requests.push(
-      requestItem(`Computed: ${attribute}`, 'GET', path, { attributes: attribute }, hdrs),
+      requestItem(
+        `Computed: ${attribute}`,
+        'GET',
+        path,
+        computedAttributeQuery('attributes', attribute, declared),
+        hdrs,
+      ),
     );
   }
 
-  if (attributes.length > 1) {
+  const combinable = argumentFreeComputedAttributes(declared);
+
+  if (combinable.length > 1) {
     requests.push(
       requestItem('Computed: multiple attributes', 'GET', path, {
-        attributes: attributes.join(','),
+        attributes: combinable.join(','),
       }, hdrs),
     );
   }
@@ -361,9 +415,9 @@ function buildShowRequests(basePath: string, slug: string, reg: ModelRegistratio
   }
   for (const attribute of Object.keys(reg.recordComputedAttributes ?? {})) {
     requests.push(
-      requestItem(`Show with computed attribute ${attribute}`, 'GET', path, {
-        computed_attributes: attribute,
-      }, hdrs),
+      requestItem(`Show with computed attribute ${attribute}`, 'GET', path,
+        computedAttributeQuery('computed_attributes', attribute, reg.recordComputedAttributes),
+        hdrs),
     );
   }
   return requests;

@@ -21,8 +21,22 @@ import { ResourcePolicy } from '../policies/resource-policy';
 import { RhinoException } from '../errors/rhino-exception';
 import type { RhinoRequest } from '../interfaces/rhino-request.interface';
 import type { ModelRegistration } from '../interfaces/rhino-config.interface';
+import { bindArguments } from '../utils/argument-binder';
+import {
+  computedAttributeRequiresArguments,
+  lookupComputedAttribute,
+} from '../utils/computed-attribute-spec';
 
 type ReqWithCtx = RhinoRequest;
+
+/**
+ * A validated computed-attribute selection: the names to evaluate, and the
+ * bound arguments per name (empty for an attribute that declares no parameters).
+ */
+interface ComputedSelection {
+  names: string[];
+  args: Record<string, Record<string, any>>;
+}
 
 /**
  * The automatic CRUD controller. Registered with the dynamic route prefix
@@ -126,7 +140,12 @@ export class GlobalController {
    * ONCE over the whole (scoped + filtered) collection instead of once per row,
    * which is what makes aggregates such as `activeUsersCount` cheap.
    *
-   * Omitting `?attributes=` returns every declared attribute the policy allows.
+   * Omitting `?attributes=` returns every declared attribute the policy allows,
+   * minus any that declares a required parameter — those are skipped silently.
+   *
+   * Attributes that declare parameters take them in the bracket form:
+   *
+   *   ?attributes[revenue][from]=2026-01-01&attributes[revenue][to]=2026-02-01
    */
   /**
    * Split a comma-separated attribute list, dropping blanks and duplicates.
@@ -157,56 +176,118 @@ export class GlobalController {
   }
 
   /**
-   * Parse and authorize `?attributes=a,b` for the /computed endpoint.
+   * Turn the raw query value into an ordered list of `[name, rawArguments]`
+   * pairs, accepting every form:
+   *
+   *   ?attributes=a,b                       legacy comma list, no arguments
+   *   ?attributes[revenue]=                 one name, no arguments
+   *   ?attributes[since]=2026-01-01         binds to the single declared param
+   *   ?attributes[revenue][from]=a&...      named arguments
+   */
+  private parseAttributeSelection(raw: any): Array<[string, any]> {
+    if (typeof raw === 'string') {
+      return this.parseAttributeList(raw).map((name) => [name, ''] as [string, any]);
+    }
+
+    // A positional list (?attributes[]=x) or a repeated ?attributes=a&attributes=b
+    // names nothing: reject before any lookup.
+    if (Array.isArray(raw) || typeof raw !== 'object' || raw === null) {
+      throw RhinoException.forbidden('Computed attributes are not allowed');
+    }
+
+    // Own keys only: `constructor` / `__proto__` must never resolve to a
+    // prototype member, whatever query parser fed us.
+    const pairs: Array<[string, any]> = [];
+    for (const name of Object.keys(raw)) {
+      if (name === '') {
+        throw RhinoException.forbidden('Computed attributes are not allowed');
+      }
+      if (!Object.prototype.hasOwnProperty.call(raw, name)) continue;
+      pairs.push([name, (raw as Record<string, any>)[name]]);
+    }
+    return pairs;
+  }
+
+  /**
+   * Gate every requested attribute, then bind its arguments.
+   *
+   * The declared-check and the policy-check run BEFORE any binding, so the more
+   * specific argument messages can only ever be seen for a name the caller was
+   * already allowed to use.
+   */
+  private bindAttributeSelection(
+    requested: Array<[string, any]>,
+    declared: Record<string, any>,
+    reg: ModelRegistration,
+    req: any,
+  ): ComputedSelection {
+    const names: string[] = [];
+    const args: Record<string, Record<string, any>> = {};
+
+    for (const [name, rawArgs] of requested) {
+      const spec = lookupComputedAttribute(declared, name);
+      if (!spec || !this.computedAttributeAllowed(name, reg, req)) {
+        throw RhinoException.forbidden(`Computed attribute '${name}' is not allowed`);
+      }
+
+      args[name] = bindArguments({
+        subject: 'Computed attribute',
+        name,
+        params: spec.params,
+        optional: spec.optional,
+        raw: rawArgs,
+      });
+      names.push(name);
+    }
+
+    return { names: [...new Set(names)], args };
+  }
+
+  /**
+   * Parse and authorize `?attributes=` for the /computed endpoint.
    *
    * An undeclared name and a policy-denied name produce the SAME 403, so the
    * endpoint never reveals which attributes a model declares. Omitting the
-   * param selects every declared attribute the policy allows.
+   * param selects every declared attribute the policy allows, MINUS any that
+   * declares a required parameter — those are skipped silently, so adding a
+   * parameterised attribute never breaks a bare `/computed` call.
    */
   private resolveRequestedCollectionAttributes(
     raw: any,
     declared: Record<string, any>,
     reg: ModelRegistration,
     req: any,
-  ): string[] {
+  ): ComputedSelection {
     if (raw == null || raw === '') {
-      return Object.keys(declared).filter((name) => this.computedAttributeAllowed(name, reg, req));
+      const names = Object.keys(declared).filter((name) => {
+        if (!this.computedAttributeAllowed(name, reg, req)) return false;
+        const spec = lookupComputedAttribute(declared, name);
+        return !!spec && !computedAttributeRequiresArguments(spec);
+      });
+      return { names, args: {} };
     }
 
-    const names = this.parseAttributeList(raw);
-    for (const name of names) {
-      const isDeclared = Object.prototype.hasOwnProperty.call(declared, name);
-      if (!isDeclared || !this.computedAttributeAllowed(name, reg, req)) {
-        throw RhinoException.forbidden(`Computed attribute '${name}' is not allowed`);
-      }
-    }
-    return names;
+    return this.bindAttributeSelection(this.parseAttributeSelection(raw), declared, reg, req);
   }
 
   /**
-   * Parse and authorize `?computed_attributes=a,b` for index/show/trashed —
-   * the OPT-IN record-level computed attributes. Absent or empty means "none",
-   * which is byte-for-byte the pre-feature behavior.
+   * Parse and authorize `?computed_attributes=` for index/show/trashed — the
+   * OPT-IN record-level computed attributes. Accepts the same four forms as
+   * `?attributes=`. Absent or empty means "none", which is byte-for-byte the
+   * pre-feature behavior.
    */
   private resolveRequestedComputedAttributes(
     query: any,
     reg: ModelRegistration,
     req: any,
-  ): string[] {
+  ): ComputedSelection {
     const raw = query?.computed_attributes ?? query?.computedAttributes;
-    if (raw == null || raw === '') return [];
+    if (raw == null || raw === '') return { names: [], args: {} };
 
-    const names = this.parseAttributeList(raw);
-    if (names.length === 0) return [];
+    const requested = this.parseAttributeSelection(raw);
+    if (requested.length === 0) return { names: [], args: {} };
 
-    const declared = reg.recordComputedAttributes ?? {};
-    for (const name of names) {
-      const isDeclared = Object.prototype.hasOwnProperty.call(declared, name);
-      if (!isDeclared || !this.computedAttributeAllowed(name, reg, req)) {
-        throw RhinoException.forbidden(`Computed attribute '${name}' is not allowed`);
-      }
-    }
-    return names;
+    return this.bindAttributeSelection(requested, reg.recordComputedAttributes ?? {}, reg, req);
   }
 
   @Get(':modelSlug/computed')
@@ -224,12 +305,20 @@ export class GlobalController {
       throw RhinoException.notFound();
     }
 
-    const names = this.resolveRequestedCollectionAttributes(query?.attributes, declared, reg, req);
+    const selection = this.resolveRequestedCollectionAttributes(
+      query?.attributes,
+      declared,
+      reg,
+      req,
+    );
 
-    const data = await this.resources.computeCollectionAttributes(modelSlug, query, names, {
-      user: req.user,
-      organization: req.organization,
-    });
+    const data = await this.resources.computeCollectionAttributes(
+      modelSlug,
+      query,
+      selection.names,
+      { user: req.user, organization: req.organization },
+      selection.args,
+    );
 
     return { data };
   }
@@ -242,7 +331,7 @@ export class GlobalController {
   ) {
     const reg = this.assertActionAllowed(modelSlug, 'trashed');
     if (!reg.softDeletes) throw RhinoException.actionDisabled('trashed');
-    const computedAttributes = this.resolveRequestedComputedAttributes(query, reg, req);
+    const computed = this.resolveRequestedComputedAttributes(query, reg, req);
     const result = await this.resources.findAll(modelSlug, query, {
       user: req.user,
       organization: req.organization,
@@ -251,7 +340,8 @@ export class GlobalController {
     const items = this.serializer.serializeMany(result.items, reg, {
       user: req.user,
       organization: req.organization,
-      computedAttributes,
+      computedAttributes: computed.names,
+      computedAttributeArgs: computed.args,
     });
     if (result.total != null) {
       return paginated(items, result.total, result.page!, result.perPage!);
@@ -267,7 +357,7 @@ export class GlobalController {
   ) {
     const reg = this.assertActionAllowed(modelSlug, 'index');
     this.assertIncludesAuthorized(query?.include, req, modelSlug);
-    const computedAttributes = this.resolveRequestedComputedAttributes(query, reg, req);
+    const computed = this.resolveRequestedComputedAttributes(query, reg, req);
     const result = await this.resources.findAll(modelSlug, query, {
       user: req.user,
       organization: req.organization,
@@ -275,7 +365,8 @@ export class GlobalController {
     const items = this.serializer.serializeMany(result.items, reg, {
       user: req.user,
       organization: req.organization,
-      computedAttributes,
+      computedAttributes: computed.names,
+      computedAttributeArgs: computed.args,
     });
     if (result.total != null) {
       return paginated(items, result.total, result.page!, result.perPage!);
@@ -292,7 +383,7 @@ export class GlobalController {
   ) {
     const reg = this.assertActionAllowed(modelSlug, 'show');
     this.assertIncludesAuthorized(query?.include, req, modelSlug);
-    const computedAttributes = this.resolveRequestedComputedAttributes(query, reg, req);
+    const computed = this.resolveRequestedComputedAttributes(query, reg, req);
     const record = await this.resources.findOne(modelSlug, id, query, {
       user: req.user,
       organization: req.organization,
@@ -301,7 +392,8 @@ export class GlobalController {
     return this.serializer.serializeOne(record, reg, {
       user: req.user,
       organization: req.organization,
-      computedAttributes,
+      computedAttributes: computed.names,
+      computedAttributeArgs: computed.args,
     });
   }
 

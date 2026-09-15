@@ -5,8 +5,42 @@ import type { ResourcePolicy } from '../policies/resource-policy';
 import type { PrismaClientLike } from '../prisma/prisma.service';
 import type { RhinoNamedScope } from '../services/scope.service';
 
-/** Callable behind an opt-in record-level computed attribute. */
-export type RecordComputedAttribute = (record: any, user: any) => any;
+/**
+ * Callable behind an opt-in record-level computed attribute.
+ *
+ * `args` carries the client-supplied arguments, keyed by the parameter names
+ * the declaration listed. It is a third POSITIONAL parameter rather than a
+ * property on a context object because the existing signature is positional and
+ * adding a parameter is non-breaking; collection attributes get the same object
+ * on `ctx.args`.
+ *
+ * Serialization is synchronous, so a record callable must not be async — a
+ * promise returned here lands in the response.
+ */
+export type RecordComputedAttribute = (
+  record: any,
+  user: any,
+  args?: Record<string, any>,
+) => any;
+
+/**
+ * Extended declaration for a record-level computed attribute that takes
+ * client-supplied parameters, sent as `?computed_attributes[name][param]=value`.
+ *
+ * A declaration is treated as a spec if and only if it is an object carrying at
+ * least one of `params` / `optionalParams` / `using`. Anything else — a
+ * function, a scalar, an array, an object without those keys — stays a LEGACY
+ * declaration and behaves exactly as it does today, so an existing literal
+ * declaration can never be reinterpreted as a parameter list.
+ */
+export interface RecordComputedAttributeSpec {
+  /** Declared parameter names, in declared order. */
+  params?: string[];
+  /** Declared parameters the client may omit; absent from `args` when omitted. */
+  optionalParams?: string[];
+  /** The callable; `args` carries the bound arguments. */
+  using?: RecordComputedAttribute;
+}
 
 /** Context handed to a collection-level computed attribute. */
 export interface CollectionComputedContext {
@@ -19,12 +53,39 @@ export interface CollectionComputedContext {
   user?: any;
   organization?: any;
   modelSlug: string;
+  /**
+   * Client-supplied arguments, keyed by the parameter names the declaration
+   * listed. Empty unless the attribute declared `params`. An omitted optional
+   * parameter is simply absent.
+   *
+   * These values are client input: use them as bound predicate values only.
+   * They reach the callable AFTER the organization scope is applied to
+   * `ctx.where`, and must never be interpolated into raw SQL or used to pick a
+   * column or a model.
+   */
+  args?: Record<string, any>;
 }
 
 /** Callable behind a collection-level computed attribute. */
 export type CollectionComputedAttribute = (
   ctx: CollectionComputedContext,
 ) => any | Promise<any>;
+
+/**
+ * Extended declaration for a collection-level computed attribute that takes
+ * client-supplied parameters, sent as `?attributes[name][param]=value`.
+ *
+ * Same detection rule as `RecordComputedAttributeSpec`: an object carrying at
+ * least one of `params` / `optionalParams` / `using`, and nothing else.
+ */
+export interface CollectionComputedAttributeSpec {
+  /** Declared parameter names, in declared order. */
+  params?: string[];
+  /** Declared parameters the client may omit; absent from `ctx.args` when omitted. */
+  optionalParams?: string[];
+  /** The callable; the bound arguments arrive on `ctx.args`. */
+  using?: CollectionComputedAttribute;
+}
 
 export interface ModelRegistration {
   /** Prisma model name (camelCase or PascalCase — matches the delegate on prisma client) */
@@ -79,8 +140,22 @@ export interface ModelRegistration {
    * work is only paid for when it is actually wanted. Merged before policy
    * filtering, so `hiddenAttributesForShow()` / `permittedAttributesForShow()`
    * still govern them.
+   *
+   * An attribute may declare PARAMETERS the client supplies as
+   * `?computed_attributes[name][param]=value` — use the extended form, an
+   * object carrying `params` (and optionally `optionalParams` and `using`):
+   *
+   *   ticketsSince: {
+   *     params: ['since'],
+   *     using: (record, user, args) => countSince(record, args!.since),
+   *   }
+   *
+   * Any other value (a function, a scalar, an array) keeps its current meaning.
    */
-  recordComputedAttributes?: Record<string, RecordComputedAttribute>;
+  recordComputedAttributes?: Record<
+    string,
+    RecordComputedAttribute | RecordComputedAttributeSpec | any
+  >;
   /**
    * COLLECTION-level computed attributes, served by
    * `GET /api/{resource}/computed?attributes=a,b`. Each entry is evaluated
@@ -94,8 +169,27 @@ export interface ModelRegistration {
    *
    * Declaring at least one attribute here is what makes the `/computed` route
    * respond for the model.
+   *
+   * An attribute may declare PARAMETERS the client supplies as
+   * `?attributes[name][param]=value` — use the extended form, an object
+   * carrying `params` (and optionally `optionalParams` and `using`):
+   *
+   *   revenue: {
+   *     params: ['from', 'to'],
+   *     using: (ctx) => ctx.delegate.aggregate({
+   *       where: { ...ctx.where, createdAt: { gte: ctx.args!.from, lte: ctx.args!.to } },
+   *       _sum: { total: true },
+   *     }),
+   *   }
+   *
+   * An attribute with a REQUIRED parameter is skipped by a bare
+   * `GET /computed` rather than 403'd, so adding one never breaks a client that
+   * asks for everything.
    */
-  collectionComputedAttributes?: Record<string, CollectionComputedAttribute>;
+  collectionComputedAttributes?: Record<
+    string,
+    CollectionComputedAttribute | CollectionComputedAttributeSpec | any
+  >;
   scopes?: Type<any>[];
   /**
    * Client-selectable named scopes for ?scope=<key>. Only declared keys are

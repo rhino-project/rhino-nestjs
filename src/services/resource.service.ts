@@ -5,6 +5,7 @@ import { QueryBuilderService, ParsedQuery } from './query-builder.service';
 import { ScopeService } from './scope.service';
 import { resolveUserRoleSlug } from '../utils/permission-matcher';
 import { RhinoException } from '../errors/rhino-exception';
+import { lookupComputedAttribute } from '../utils/computed-attribute-spec';
 
 export interface FindAllResult {
   items: any[];
@@ -210,6 +211,7 @@ export class ResourceService {
     rawQuery: Record<string, any>,
     names: string[],
     ctx: ResourceContext = {},
+    args: Record<string, Record<string, any>> = {},
   ): Promise<Record<string, any>> {
     const reg = this.config.model(modelSlug);
     if (!reg) throw new Error(`Unknown model: ${modelSlug}`);
@@ -246,11 +248,18 @@ export class ResourceService {
 
     const out: Record<string, any> = {};
     for (const name of names) {
-      const entry = declared[name];
+      // Own-key lookup so a prototype key can never resolve to a member.
+      const spec = lookupComputedAttribute(declared, name);
+      if (!spec) continue;
+
+      const entry = spec.using;
       if (typeof entry !== 'function') {
         out[name] = entry;
         continue;
       }
+
+      // Client arguments arrive on ctx.args. The where filter handed over is
+      // already organization-scoped, and no argument can widen it.
       out[name] = await entry({
         where: { ...where },
         delegate,
@@ -258,6 +267,7 @@ export class ResourceService {
         user: ctx.user,
         organization: ctx.organization,
         modelSlug,
+        args: Object.prototype.hasOwnProperty.call(args, name) ? args[name] : {},
       });
     }
     return out;

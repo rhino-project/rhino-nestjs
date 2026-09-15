@@ -3,6 +3,7 @@ import type { ModelRegistration } from '../interfaces/rhino-config.interface';
 import { RhinoConfigService } from '../rhino.config';
 import { RhinoException } from '../errors/rhino-exception';
 import { DEFAULT_MAX_SCOPES_PER_REQUEST } from '../constants/defaults';
+import { bindArguments, coerceArgument } from '../utils/argument-binder';
 
 export interface ParsedQuery {
   where: Record<string, any>;
@@ -162,55 +163,16 @@ export class QueryBuilderService {
     raw: any,
   ): Record<string, any> {
     const ScopeClass = reg.namedScopes![name] as any;
-    const params: string[] = Array.isArray(ScopeClass.params) ? ScopeClass.params : [];
-    const optional: string[] = Array.isArray(ScopeClass.optionalParams)
-      ? ScopeClass.optionalParams
-      : [];
 
-    let given: Record<string, any>;
-    if (raw == null || raw === '') {
-      // ?scope[archived]= — no arguments. A scope with required parameters
-      // still fails below, naming them.
-      given = {};
-    } else if (Array.isArray(raw)) {
-      throw RhinoException.forbidden(`Scope '${name}' requires named parameters`);
-    } else if (typeof raw !== 'object') {
-      if (params.length === 0) {
-        throw RhinoException.forbidden(`Scope '${name}' does not accept arguments`);
-      }
-      // A bare value binds to the single declared parameter. Two parameters can
-      // never be guessed at from one value.
-      if (params.length > 1) {
-        throw RhinoException.forbidden(`Scope '${name}' requires named parameters`);
-      }
-      given = { [params[0]]: raw };
-    } else {
-      if (params.length === 0) {
-        throw RhinoException.forbidden(`Scope '${name}' does not accept arguments`);
-      }
-      given = { ...(raw as Record<string, any>) };
-    }
-
-    for (const key of Object.keys(given)) {
-      if (!params.includes(key)) {
-        throw RhinoException.forbidden(`Scope '${name}' does not accept parameter '${key}'`);
-      }
-      if (given[key] !== null && typeof given[key] === 'object') {
-        throw RhinoException.forbidden(`Scope '${name}' requires named parameters`);
-      }
-    }
-
-    const args: Record<string, any> = {};
-    for (const param of params) {
-      if (Object.prototype.hasOwnProperty.call(given, param)) {
-        args[param] = this.coerceScopeArgument(given[param]);
-        continue;
-      }
-      if (!optional.includes(param)) {
-        throw RhinoException.forbidden(`Scope '${name}' requires parameter '${param}'`);
-      }
-    }
-    return args;
+    // The algorithm lives in utils/argument-binder and is shared with computed
+    // attributes; the subject is what keeps the scope wording its own.
+    return bindArguments({
+      subject: 'Scope',
+      name,
+      params: Array.isArray(ScopeClass.params) ? ScopeClass.params : [],
+      optional: Array.isArray(ScopeClass.optionalParams) ? ScopeClass.optionalParams : [],
+      raw,
+    });
   }
 
   /**
@@ -218,11 +180,7 @@ export class QueryBuilderService {
    * booleans so a check cannot be fooled by the string "false".
    */
   private coerceScopeArgument(value: any): any {
-    if (typeof value !== 'string') return value;
-    const lowered = value.toLowerCase();
-    if (lowered === 'true') return true;
-    if (lowered === 'false') return false;
-    return value;
+    return coerceArgument(value);
   }
 
   /**
